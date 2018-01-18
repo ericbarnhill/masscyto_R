@@ -1,0 +1,21 @@
+
+model {
+    for (i in 1:n_samps) {
+        value[i] ~ dlnorm(mu[i], tau2)
+        log(mu[i])  <- b0 + b1[cont_ag[i]]*conc[i]
+    }
+    
+    b0  ~ dnorm(0, 1/100)
+    
+    for (q in 1:n_cont_ags) {
+        b1[q] ~ dnorm(mu_cont_ag, tau_cont_ag)
+    }
+
+    sigma ~ dunif(0.001, 10)
+    tau2 <- 1 / sigma^2
+ 
+    mu_cont_ag ~ dnorm(0, 1 / 10000)
+    sig_cont_ag ~ dunif(0.001, 1000)
+    tau_cont_ag <- 1 / sig_cont_ag^2
+  
+}

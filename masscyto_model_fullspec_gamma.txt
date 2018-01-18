@@ -1,0 +1,37 @@
+
+model {
+    for (i in 1:n_samps) {
+        value[i] ~ dgamma(shape, shape / pred[i])
+        log(pred[i])  <- b0[c_typ[i]] + b1[c_typ[i]]*conc[i] + b2[cont_ag[i]] + b3[cont_ag[i]]*conc[i] + b4[exp[i]]
+    }
+    for (p in 1:n_c_typs) {
+        b0[p] ~ dnorm(mu_c_typ, tau_c_typ)
+    }
+    for (q in 1:n_c_typs) {
+        b1[q] ~ dnorm(mu_conc, tau_conc)
+    }
+    for (r in 1:n_cont_ags) {
+        b2[r] ~ dnorm(mu_cont_ag, tau_cont_ag)
+    }
+    for (s in 1:n_cont_ags) {
+        b3[s] ~ dnorm(mu_exp, tau_exp)
+    }
+    
+    shape ~ dunif(0.001, 10)
+
+    mu_c_typ ~ dnorm(0, 1 / 10000)
+    sig_c_typ ~ dunif(0.001, 1000)
+    tau_c_typ <- 1 / sig_c_typ^2
+
+    mu_conc ~ dnorm(0, 1 / 10000)
+    sig_conc ~ dunif(0.001, 1000)
+    tau_conc <- 1 / sig_conc^2
+
+    mu_cont_ag ~ dnorm(0, 1 / 10000)
+    sig_cont_ag ~ dunif(0.001, 1000)
+    tau_cont_ag <- 1 / sig_cont_ag^2
+    
+    mu_exp ~ dnorm(0, 1 / 10000)
+    sig_exp ~ dunif(0.001, 1000)
+    tau_exp <- 1 / sig_exp^2
+}
