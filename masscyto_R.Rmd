@@ -2,9 +2,7 @@
 title: "Bayesian Uncertainty Modelling In A Mass Cytometry Experiment"
 author: "Eric Barnhill"
 date: "January 16, 2018"
-output:
-  html_document: default
-  pdf_document: default
+output: html_notebook
 header-includes: \usepackage{bbm}
 ---
 
@@ -20,7 +18,6 @@ require(HDInterval)
 require(reshape2)
 require(rjags)
 require(RColorBrewer)
-require(plyr)
 ```
 
 ## Introduction
@@ -75,13 +72,16 @@ We point out two key properties for modeling this data.
 
 First, there is considerable overlap between results, as the concentration approaches zero, for contrast agents and experiments. Consequently, within each of the six cell types, there is unlikely to be an independent intercept for either contrast agent or experiment. Rather, the variable quantity is the *slope of the lines*, that is, the increase in signal for each unit of concentration. The response of the signal to concentration appears approximately linear and therefore it appears appropriate to model the slope linearly.
 
-Second, the third experiment (longer dashes) `r 3+2` overall appeared higher than the other experiments while the first and second experiment values appeared similar. A boxplot confirms that the median is, for each data set, looking higher on the third experiment:
+Second, the third experiment (longer dashes) overall appeared higher than the other experiments while the first and second experiment values appeared similar. A boxplot confirms that the median is, for each data set, looking higher on the third experiment:
 
-```{r, fig.height = 4, fig.width = 10}
-plt <- ggplot(subset(mass_cyto_tall, MeasurementType  == "Median" & ContrastAgent != "control")) +
-    geom_point(aes(y=value, x=Concentration, group=ContrastAgent, col=ContrastAgent)) +
-    facet_wrap(~ CellType, scales="free", ncol=3)
-print(plt)
+```{r}
+par(mfrow=c(3,2))
+par(mar=c(2,2,2,2))
+for (n in levels(mass_cyto_tall$CellType)) {
+    boxplot(value ~ Experiment, subset(mass_cyto_tall, MeasurementType == "Median" & CellType == n))
+    title(n)
+    xlab("Experiment")
+}
 ```
 Next we move on from medians alone to overall summary statistics, to evaluate the distribution of values:
 ```{r, fig.height = 4, fig.width = 10}
@@ -106,10 +106,9 @@ gamma_model <- function(par){
 The inline code then calls the model with a set of parameters:
 ```{r}
 call_abc_model <- function() {
-m2 <- ABC_mcmc(method="Marjoram", model=gamma_model,
-               prior=list(c("unif",1e-3,10),c("unif",1e-3,5)),
-               summary_stat_target=group_sum_stats, n_rec = N_REC, 
-               verbose=TRUE)
+m2 <- ABC_mcmc(method="Marjoram", model=gamma_model,                             prior=list(c("unif",1e-3,10),c("unif",1e-3,5)), 
+summary_stat_target=group_sum_stats, n_rec = N_REC, 
+verbose=TRUE)
 }
 ```
 
@@ -164,7 +163,7 @@ cat(readLines('masscyto_model_celltype_dgamma_2.txt'), sep = '\n')
 ```
 where b0 is the global intercept, and b1[1] to b1[4] are slopes for the four contrast agents of control, Dotarem, Gadovist and Magnevist.
 
-Several diagnostics were used to evaluate the performance of this model. Goodness of fit was measured with the Divergence Information Criterion (DIC), and compared to DIC results for similar models based on normal and lognormal distributions. To ensure convergence of the MCMC chains, the Gelman-Rubin diagnostic and Autocorrelation diagnostics were also checked. To test the experimental hypothesis a Region Of Practical Equivalence (ROPE) was set of 0.03, that is, results whose difference were less than 3% were considered equivalent.
+Several diagnostics were used to evaluate the performance of this model. Goodness of fit was measured with the Divergence Information Criterion (DIC), and compared to DIC results for similar models based on normal and lognormal distributions. To ensure convergence of the MCMC chains, the Gelman-Rubin diagnostic and Autocorrelation diagnostics were also checked. The final shape and rate parameters were then used to predictively model the original data and error was measured.
 
 ## Multilevel Model: Results
 ```{r}
@@ -190,11 +189,9 @@ The results above are presented in terms of a ratio between the two contrasted a
 ```{r, fig.height = 8, fig.width = 10}
 plot_contrast_agent_slopes(contrast_values)
 ```
-Finally, the fully Bayesian treatment of this data allows us to not only estimate pointwise effects, but evaluate how credible the effects are. In the above plot, the same means are represented by dots, while the bars represent a Bayesian quantity called the 95% credible interval, which allows us to model our total uncertainty. Consequently if both bars are either above or below the ROPE (in dashed red), then given the data from the experiment, we are 95% condfident of an effect. 
+Finally, the fully Bayesian treatment of this data allows us to not only estimate pointwise effects, but evaluate how credible the effects are. In the above plot, the same means are represented by dots, while the bars represent a Bayesian quantity called the 95% credible interval, which allows us to model our total uncertainty. Consequently if both bars are either above or below zero, then given the data from the experiment, we are 95% condfident of an effect. Across all cell types, it can be seen that Gadovist and Magnevist produce higher contrasts than Dotarem with 95% confidence. Gadovist shows more signal than Magnevist for three cell types (B cells, NK cells_2 and T cells) and there is not enough information to draw a conclusion for the other cell types.
 
-Across all cell types, it can be seen that Gadovist and Magnevist produce higher contrasts than Dotarem with 95% confidence, with the exception of NK_cells_2, for which confidence was $\approx 92\%$. Gadovist shows more signal than Magnevist for three cell types (B cells, NK cells_2 and T cells) and there is not enough information to draw a conclusion for the other cell types. For NK cells_2 and T cells, Gadovist has more signal response than Magnevist with 95% credibility, for the others, the present experiment did not produce sufficient information to determine the presence or absence of an effect.
-
-## Discusssion
+## Discussion
 
 The mass cytometry data for the present study contains a great deal of information,not only on point estimates for each experimental condition, but on the distribution of values for each experimental condition. This in turn allows us to estimate both confidence and uncertainty in the reported parameters. 
 

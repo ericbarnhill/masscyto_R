@@ -4,7 +4,7 @@ quantiles_table <- function(mass_cyto_tall) {
     cont_ags <- levels(mass_cyto_tall$ContrastAgent)
     concs <- levels(mass_cyto_tall$Concentration)
     measurements = levels(mass_cyto_tall$MeasurementType)[2:5]
-    quantiles <- matrix(nrow=0,ncol=6)
+    quantiles <- matrix(nrow=0,ncol=7)
     concs <- c(0.1, 0.3, 1.0)
     for (m in 1:6) {
         for (c in 1:length(concs)) {
@@ -24,24 +24,27 @@ quantiles_table <- function(mass_cyto_tall) {
                     ),"value"])
                 }
                 meas_vec[5] <- c_typs[m]
-                index <- (c-1)*3 + b1-1
-                meas_vec[6] <- index
+                meas_vec[6] <- b1-1
+                meas_vec[7] <- conc
                 quantiles <- rbind(quantiles, meas_vec)
             }
         }
     }
     quantiles <- as.data.frame(quantiles)
-    colnames(quantiles) <- c(measurements, "CellType", "index")
+    colnames(quantiles) <- c(measurements, "CellType", "Experiment", "Concentration")
     rownames(quantiles) <- NULL
     for (n in c(1:4)) {
         quantiles[,n] <- as.numeric(as.character(quantiles[,n]))
     }
-    quantiles_tall <- gather(quantiles, "value_type", "value", factor_key = T, -(5:6))
+    quantiles_tall <- gather(quantiles, "value_type", "value", factor_key = T, -(5:7))
+    #combine the three experiments
+    quantiles_tall <- aggregate(value ~ CellType + Concentration + value_type, quantiles_tall, mean)
     quantiles_plot <- ggplot(quantiles_tall) +
-        geom_line(aes(x=index, y=value, group=value_type, col=value_type)) +
+        geom_line(aes(x=Concentration, y=value, group=value_type, col=value_type)) +
         labs(title="Cytometer Quantiles for Experimental Conditions", 
              x="Concentration x Experiment", y="Signal") +
-        facet_wrap( ~ CellType, scales="free")
+        facet_wrap(~ CellType, scales="free", ncol=3) +
+        scale_x_discrete(expand = c(0,0))
     print(quantiles_plot)
     return(quantiles_tall)
 }

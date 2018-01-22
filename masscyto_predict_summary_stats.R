@@ -48,8 +48,8 @@ collect_dist_results <- function(mass_cyto_tall, dist_models) {
     concentrations <- levels(mass_cyto_tall$Concentration)
     
     index = 1;
-    #for (i in 1:length(experiments)) {
-    for (i in 1:1) { # only analyze first experiment
+    for (i in 1:length(experiments)) {
+    #for (i in 1:1) { # only analyze first experiment
         for (j in 1:length(contrast_agents)) {
             for (k in 1:length(concentrations)) {
             experimental_group <- mass_cyto_tall[which(
@@ -144,10 +144,11 @@ plot_dist_results <- function(dist_results) {
     cols <- brewer.pal(3, 'Set1')
     ggplot(dist_results) + 
             geom_line(aes(x=exp_cond, y=value, group=method, col=method, linetype = method)) +
-        facet_wrap( ~ stat, scales="free") +
+        facet_wrap(~ stat, scales="free") +
         scale_linetype_manual(values=c("dashed", "solid", "dashed", "dashed")) +
         labs(title="Comparison of Experimental and Predicted Summary Statistics", 
-             x="Concentration X Celltype X Experiment", y="Signal")
+             x="All Experiments", y="Signal") +
+        theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
 }
 
 make_error_table <-function(error_results) {
