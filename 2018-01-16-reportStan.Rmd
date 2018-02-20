@@ -62,7 +62,7 @@ Data were cleaned and converted to tall format:
 
 
 ```{r}
-source('masscyto_clean_gather_data.R')
+source('masscyto_clean_gather_dataNEW.R')
 mass_cyto <- read.xls(xls="experimental_data.xlsx", 
                       header=FALSE, skip=3, nrows=30)[,-(5:10)]
 mass_cyto_tall <- clean_gather_data(mass_cyto)
@@ -89,16 +89,17 @@ We will use sliding contrasts to reflect the above ordering:
 
 ```{r}
 library(MASS)
-comparisons<-round(ginv(contr.sdif(3)))
+## reversing the signs by multiplying by -1:
+comparisons<- -1*round(ginv(contr.sdif(3)))
 rownames(comparisons)<-c("MvsD","DvsG")
 comparisons
 ```
 
-Also, we would have to remove control from that particular analysis, because controls have only one level of the concentrations. But the effect of control can be estimated and used as a baseline.
+Also, we would have to remove control from that particular analysis, because controls have only one level of the concentrations. But the effect of control can be estimated and used as a baseline (to-do).
 
-The experiments need to be modeled as a random effect because each experiment is actually a patient. 
+Experiment needs to be modeled as a random effect because each experiment is actually a patient. 
 
-## Computing standard deviation of the dependent variable ``value''
+## Computing standard deviation of the dependent variable ``value'' in preparation for measurement error modeling
 
 We can just take logs on the mean and the quantile measurements and then get the measurement error on the log scale:
 
@@ -157,66 +158,93 @@ library(lattice)
 xyplot(log(value)~Concentration|ContrastAgent+Experiment,means)
 ```
 
-We start simple, by just modeling the effect of concentration on log(value). 
-Here is the standard hierarchical linear model of effect of concentration on log value, for each cell type separately. Experiment is treated as random effect.
+We start by just modeling the effect of concentration on log(value).  Concentration is centered and scaled to have standard deviation 1; this has the (small) advantage that the intercept now has the interpretation that it reflects the predicted log(value) when concentration is the average value. 
+
+Here is the standard hierarchical linear model of effect of concentration on log value. Cell Types and Experiment are treated as random effects. Here I am making the simplifying assumption that Cell Types and Experiment are independent---is this reasonable? 
+
+
 
 ```{r concentrationlmer}
-# extract cell names:
-celltypename<-unique(means$CellType)
+m1<-lmer(log(value)~cconc+(1+cconc|Experiment)+
+          (1+cconc|CellType),
+        subset(means,ContrastAgent!="control"))
 
-## fit separate model for each cell type:
-for(i in 1:6){
-m<-lmer(log(value)~cconc+(1+cconc|Experiment),
-        subset(means,ContrastAgent!="control" & CellType==celltypename[i]))
-print(summary(m))
-}
+print(summary(m1))
 ```
 
-The above frequentist model can be fit in Stan quite easily:
+The above frequentist model has some problems. In particular, it cannot estimate the correlations (notice that these are $\pm 1$). I would therefore fit a simpler frequentist model, assuming no correlations between the varying intercepts and slopes:
+
+```{r concentrationlmer2}
+m2<-lmer(log(value)~cconc+(1+cconc||Experiment)+
+          (1+cconc||CellType),
+        subset(means,ContrastAgent!="control"))
+
+print(summary(m2))
+```
+
+The full model above (m1) can be fit in Stan quite easily. As priors for the fixed effects we choose Cauchy(0,5), to allow them to have extreme values, and for the others, we choose Normal(0,1), which seems reasonable as the dependent variable is on the log scale and the standard deviations are all going to be less than 1. The correlation parameters have as priors the LKJ(2) prior, which downweights the extreme values $\pm 1$.
 
 ```{r concentrationbrms,cache=TRUE}
-priors<-c(set_prior("cauchy(0,2.5)", 
+priors<-c(set_prior("cauchy(0,5)", 
                     class = "b"),
-                      set_prior("normal(0,1)", class = "b",coef="cconc"),set_prior("normal(0,1)", class = "sd"), set_prior("normal(0,1)", class = "sigma"))
+                      set_prior("cauchy(0,5)", class = "b",coef="cconc"),set_prior("normal(0,1)", class = "sd"), set_prior("normal(0,1)", class = "sigma"),
+          set_prior("lkj(2)", class = "cor"))
 
-for(i in 1:6){
-m<-brm(formula = log(value)  ~ 1 + cconc + (1 +cconc| Experiment),
-            data = subset(means,ContrastAgent!="control" & CellType==celltypename[i]), 
+m1brm<-brm(formula = log(value) ~ cconc+(1+cconc|Experiment)+
+          (1+cconc|CellType),
+            data = subset(means,ContrastAgent!="control"), 
             family = gaussian(),
             prior = priors,
             warmup = 1000, 
             iter = 2000, 
             chains = 4,
-            control = list(adapt_delta = 0.99,max_treedepth = 15))
-print(summary(m))
-}
+            control = list(adapt_delta = 0.99,max_treedepth=15))
+print(summary(m1brm))
 ```
 
+Notice some important differences between the frequentist model (FM) and the Bayesian model (BM): The FM fails to estimate the intercept-slope correlations; the BM is able to estimate the correlations, but also shows very high uncertainty in the posterior distributions of these correlations. The BM also provides 95% credible intervals for each parameter; the FM only does this for the fixed effects parameters (the intercept and the effect of concentration).
 
-Hierarchical linear model with measurement error on dependent variable:
-
-to do
-
-
-## Modeling effect of contrast agent
-
-The lmer model is failing to estimate parameters (the correlations between random intercepts and slopes in particular):
+Plotting the posteriors:
 
 ```{r}
-contrasts(means$ContrastAgent)
-## control has to be removed:
+plot(m1brm,N=9)
+```
 
+
+
+## Modeling effect of contrast agent and its interaction with concentration
+
+Because of the complexity of the model, I will not attempt to fit correlations in the frequentist model:
+
+```{r}
 ## hand-coded sliding contrasts:
-means$MvsD<-ifelse(means$ContrastAgent=="Magnevist",-1,
-           ifelse(means$ContrastAgent=="Dotarem",1,0))
-means$DvsG<-ifelse(means$ContrastAgent=="Dotarem",-1,
-           ifelse(means$ContrastAgent=="Gadovist",1,0))
+means$MvsD<-ifelse(means$ContrastAgent=="Magnevist",1,
+           ifelse(means$ContrastAgent=="Dotarem",-1,0))
+means$DvsG<-ifelse(means$ContrastAgent=="Dotarem",1,
+           ifelse(means$ContrastAgent=="Gadovist",-1,0))
 
-for(i in 1:6){
-m_conc_agent<-lmer(log(value)~ cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG+(1+cconc +cconc:MvsD + cconc:DvsG||Experiment),
-                 subset(means,ContrastAgent!="control" & CellType==celltypename[i]))
-print(summary(m_conc_agent))
+m3<-lmer(log(value)~ cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG+(1+cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG||Experiment)+(1+cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG||CellType),
+                 subset(means,ContrastAgent!="control"))
+print(summary(m3))
 }
 ```
 
-I will continue fitting these in Stan.
+Stan version:
+
+```{r cache=TRUE}
+m3brm<-brm(formula = log(value)~ cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG+
+             (1+cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG|Experiment)+
+             (1+cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG|CellType),
+            data = subset(means,ContrastAgent!="control"), 
+            family = gaussian(),
+            prior = priors,
+            warmup = 1000, 
+            iter = 2000, 
+            chains = 4,
+            control = list(adapt_delta = 0.99,max_treedepth=15))
+print(summary(m3brm))
+```
+
+## Measurement error on log(value)
+
+to-do
