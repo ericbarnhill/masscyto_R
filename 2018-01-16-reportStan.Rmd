@@ -138,12 +138,13 @@ means$cconc<-scale(as.numeric(as.character(means$Concentration)),scale=FALSE)
 #head(means)
 
 ## rename cell type as numerical values:
-means$typ<-unique(as.numeric(means$CellType))
+means$typ<-as.integer(as.factor(means$CellType))
 
+## needed later for measurement error model written in Stan:
 dat<-list(cconc=as.vector(means$cconc),
-     value=log(means$value),
+     logvalue=log(means$value),
      SD=means$SD,
-     typ=as.integer(means$typ),
+     typ=means$typ,
      N = dim(means)[1],
      J = length(unique(means$typ))
      )
@@ -206,15 +207,13 @@ Notice some important differences between the frequentist model (FM) and the Bay
 
 Plotting the posteriors:
 
-```{r}
+```{r fig.height=12}
 plot(m1brm,N=9)
 ```
 
+## Modeling the effect of contrast agent and their interactions with concentration
 
-
-## Modeling effect of contrast agent and its interaction with concentration
-
-Because of the complexity of the model, I will not attempt to fit correlations in the frequentist model:
+Because of the complexity of the model, in the frequentist model I will not attempt to fit correlations in the frequentist model:
 
 ```{r}
 ## hand-coded sliding contrasts:
@@ -226,10 +225,11 @@ means$DvsG<-ifelse(means$ContrastAgent=="Dotarem",1,
 m3<-lmer(log(value)~ cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG+(1+cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG||Experiment)+(1+cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG||CellType),
                  subset(means,ContrastAgent!="control"))
 print(summary(m3))
-}
 ```
 
-Stan version:
+The vertical bars in the random effects are expressing the assumption that the correlation between intercepts and slopes in random effects is assumed to be 0.
+
+Stan version implemented in brms. Here we are fitting the maximal model, because we can (due to the regularization that the priors provide on the parameters).
 
 ```{r cache=TRUE}
 m3brm<-brm(formula = log(value)~ cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG+
@@ -245,6 +245,89 @@ m3brm<-brm(formula = log(value)~ cconc +MvsD+DvsG+cconc:MvsD + cconc:DvsG+
 print(summary(m3brm))
 ```
 
-## Measurement error on log(value)
+## Measurement error on log(value): the effect of concentration
 
-to-do
+I switch to Stan instead of brms because this way I am very sure of the underlying generative process. With brms I am not sure if it is working correctly (I am working with the developer to fix the bug in brms).
+
+We start with a varying intercepts-only model.
+
+```{r concentrationME,cache=TRUE}
+Mconc <- stan(file = "StanModels/MeasErrVarInt.stan", 
+                    data = dat,
+                    iter = 4000, 
+                    chains = 4,
+              control = list(adapt_delta = 0.99,
+max_treedepth = 15))
+print(Mconc,pars=c("beta","sigma_e","sigma_u"))
+```
+
+Some minor sampling problems are apparent in the trace plots, but these can be fixed quickly with reparameterization (in any case, they become irrelevant in the maximal model below). 
+
+```{r}
+traceplot(Mconc,pars=c("beta","sigma_e","sigma_u"))
+```
+
+Next, we fit a maximal model with varying intercepts for cell type:
+
+```{r concentrationMEMaximal,cache=TRUE}
+MconcMaximal <- stan(file = "StanModels/MEVarIntMaximal.stan", 
+                    data = dat,
+                    iter = 2000, 
+                    chains = 4,
+              control = list(adapt_delta = 0.99,
+max_treedepth = 15))
+print(MconcMaximal,pars=c("beta","sigma_e","sigma_u","Conc","diff_by_celltype"))
+```
+
+We can plot the results as shown below:
+
+```{r fig.height=12}
+stan_hist(MconcMaximal,pars=c("beta","sigma_e","sigma_u","rho_u[1,2]","Conc","diff_by_celltype"))
+```
+
+The effects by cell type are also shown, and the mapping from cell type by number id (1-6) to actual cell type names can be inferred from:
+
+```{r}
+xtabs(~typ+CellType,means)
+```
+
+Also, notice that the correlation parameter has a *lot* of uncertainty; basically any value between -1 and +1 is possible, and the extreme values are downweighted due to the LKJ prior on the correlation.
+
+Next, we will fit the full measurement error model, with main effects and interactions of concentration and contrast agent.
+
+```{r}
+means$cconcMvsD <- means$cconc*means$MvsD
+means$cconcDvsG <- means$cconc*means$DvsG
+
+dat2<-list(cconc=as.vector(means$cconc),
+     logvalue=log(means$value),
+     MvsD=means$MvsD,
+     DvsG=means$DvsG,
+     cconcMvsD = as.vector(means$cconcMvsD),
+     cconcDvsG = as.vector(means$cconcDvsG),
+     SD=means$SD,
+     typ=means$typ,
+     N = dim(means)[1],
+     J = length(unique(means$typ))
+     )
+```
+
+```{r concentrationMEMaximal2,cache=TRUE}
+MconcMaximal2 <- stan(file = "StanModels/MEVarIntMaximal2.stan", 
+                    data = dat2,
+                    iter = 2000, 
+                    chains = 4,
+              control = list(adapt_delta = 0.99,
+max_treedepth = 15))
+print(MconcMaximal2,pars=c("beta","sigma_e","sigma_u","Conc","rho_u"))
+```
+
+The traceplot shows that the residual error needs to be reparameterized (to-do), but all other parameters are converging nicely.
+
+```{r}
+traceplot(MconcMaximal2,pars=c("beta","sigma_e","sigma_u","rho_u[1,2]","rho_u[1,3]","rho_u[1,4]","rho_u[1,5]","rho_u[1,6]","rho_u[2,3]","rho_u[2,4]","rho_u[2,5]","rho_u[2,6]","rho_u[3,4]","rho_u[3,5]","rho_u[3,6]","rho_u[4,5]","rho_u[4,6]","rho_u[5,6]","Conc"))
+```
+
+```{r fig.height=12}
+stan_hist(MconcMaximal2,pars=c("beta","sigma_e","sigma_u","rho_u[1,2]","rho_u[1,3]","rho_u[1,4]","rho_u[1,5]","rho_u[1,6]","rho_u[2,3]","rho_u[2,4]","rho_u[2,5]","rho_u[2,6]","rho_u[3,4]","rho_u[3,5]","rho_u[3,6]","rho_u[4,5]","rho_u[4,6]","rho_u[5,6]","Conc"))
+```
