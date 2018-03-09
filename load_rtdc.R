@@ -1,0 +1,104 @@
+load_rtdc <- function(XL_PATH) {
+    col_names <- c(
+        "cell_type",
+        "cont_ag",
+        "subj",
+        "prot",
+        "mean_area",
+        "sd_area", 
+        "05_area",
+        "95_area", 
+        "mean_def",
+        "sd_def",
+        "05_def",
+        "95_def",
+        "mean_e",
+        "sd_e",
+        "05_e",
+        "95_e"
+    )
+    n_sheets = gdata::sheetCount(XL_PATH)
+    sheet_names <- gdata::sheetNames(XL_PATH)
+    rtdc = list(length=n_sheets-1)
+    # skip first sheet -- just contains var names
+    for (s in 2:n_sheets) {
+        sheet = read.xls(XL_PATH, header=T, sheet = s, stringsAsFactors = F)
+        sheetname_split <- unlist(strsplit(sheet_names[s], "_"))
+        cell_type <- rep(sheetname_split[2], nrow(sheet))
+        cont_ag <- rep(sheetname_split[1], nrow(sheet))
+        #fix bad spelling
+        cell_type <- sapply(cell_type, function(x) {ifelse(x == "Neuthrophils", "Neutrophils", x)})
+        subj_prot <- t(sapply(sheet[,1], function(x) {
+            split_list <- unlist(strsplit(x, "-"))
+            subj <- unlist(strsplit(split_list[1], " "))
+            subj <- subj[length(subj)]
+            prot <- split_list[2]
+            subj_prot <- unname(cbind(subj,prot))
+        })) %>%
+            unname %>%
+            as.data.frame %>%
+            set_colnames(c("subj", "prot"))
+        subj <- subj_prot$subj
+        prot <- clean_prots(subj_prot$prot)
+        sheet <- cbind(cell_type, cont_ag, subj, prot, sheet[,2:ncol(sheet)])
+        colnames(sheet) <- col_names
+        rtdc[[s-1]] <- sheet
+    }
+    rtdc <-do.call(rbind, rtdc)
+    require(tidyr)
+    rtdc_tall <- gather(rtdc, key="measurement", value="value", -(1:4) )
+    rtdc_tall$measurement <- factor(rtdc_tall$measurement)
+    bad_entries <- which(rtdc_tall$measurement == "mean_e" & rtdc_tall$value > 2)
+    rtdc_tall$value[bad_entries] <- 
+        rtdc_tall$value[bad_entries] %>% `/` (100)
+    return(rtdc_tall)
+}
+
+clean_prots <- function(prots) {
+    control_entries <- c("cntl", "Contrl", "ctl", "Ctrol", "cotrl", "Ctrl", "Ctr", "Cntrol")
+    #gdcl3_entries <- c("GdCl3")
+    #gadovist_entries <- c("Gadovist", "Gadov")
+    #dotarem_entries <- c("Dotarem", "Dota")
+    #magnevist_entries <- c("Magnevist", "Magnevist_I", "Magnevist_II", "Magnevist_III")
+    prots <- sapply(as.character(prots), function(x) {
+        if (x %in% control_entries) {
+            x <- "Control"
+        } else {
+            x <- "Treatment"
+        }
+        #} else if (x %in% gadovist_entries) {
+        #    x <- "Gadovist"
+        #} else if (x %in% dotarem_entries) {
+        #    x <- "Dotarem"
+        #} else if (x %in% magnevist_entries) {
+        #    x <- "Magnevist"
+        #} else if (x %in% gdcl3_entries) {
+        #    x <- "GdCl3"
+        #} else {
+        #    print("ERROR: entry not labeled properly as control or contrast agent")
+        #}
+        return(x)
+    })
+    prots %>%
+        as.factor %>%
+        unname
+}
+
+exploratory_boxplot_e <- function() {
+    require(ggplot2)
+    graphics.off()
+    x11()
+    rtdc_tall <- load_rtdc(XL_PATH)
+    plt <- rtdc_exploratory_boxplot(rtdc_tall, "mean_e")
+    print(plt)
+    ggsave(device=pdf(width=16, height=8), filename="exploratory_boxplot.pdf")
+}
+
+rtdc_exploratory_boxplot <- function(rtdc_data, stat) {
+    ggplot(subset(rtdc_data, measurement == stat)) +
+        geom_point(aes(x=prot, y=value), colour="gray60") + 
+        stat_summary(aes(x=prot, y=value), fun.y=median, geom="point", shape=18,
+                     size=3, color="red") +
+        facet_grid(. ~ cell_type + cont_ag) +
+        ggtitle("Mean Young's Modulus")
+}

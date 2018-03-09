@@ -1,0 +1,31 @@
+---
+title: "RT-DC Data"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+Load and explore RT-DC data
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
+knitr::opts_chunk$set(root.dir = PROJ_DIR)
+setwd(PROJ_DIR)
+require(gdata,tidyr,dplyr,magrittr)
+```
+
+Load and clean data
+```{r}
+source("load_rtdc.R")
+XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb.xls")
+rtdc_tall <- load_rtdc(XL_PATH)
+```
+Explore means of deformation and E with boxplots
+```{r}
+    plt_e <- rtdc_exploratory_boxplot(rtdc_tall, "mean_e")
+    print(plt_e)
+    plt_def <- rtdc_exploratory_boxplot(rtdc_tall, "mean_def")
+    print(plt_def)
+```
+

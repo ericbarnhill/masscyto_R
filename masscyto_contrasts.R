@@ -47,11 +47,13 @@ contrast_agent_slopes <- function(models, mass_cyto_tall) {
 
 plot_contrast_agent_slopes <- function(contrast_values) {
     ROPE = 0.03
+    labels = c("Gadovist:\nDotarem", "Magnevist:\nDotarem", "Magnevist:\nGadovist")
     plot_obj <- ggplot(contrast_values) + 
         geom_point(aes(x=factor(cont_indices), y=mean, group=cell_type_indices))  + 
         geom_errorbar(aes(x=factor(cont_indices), ymin=low, ymax=high, group=cell_type_indices), alpha = 0.3)  + 
+        scale_x_discrete(labels=labels) +
         facet_wrap( ~ cell_type_indices) +
-        labs(title="Ratios of Contrast Agent Slopes", x="Contrast", y="Ratio") +
+        labs(title="Ratios of Contrast Agents At Unit Concentration", x="Contrast", y="Ratio") +
         geom_hline(aes(yintercept=ROPE), colour="firebrick4", linetype="dashed") +
         geom_hline(aes(yintercept=-ROPE), colour="firebrick4", linetype="dashed")
         
