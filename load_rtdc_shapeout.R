@@ -1,48 +1,42 @@
 load_rtdc <- function(XL_PATH) {
+    require(magrittr, dplyr, tidyr)
     col_names <- c(
-        "cell_type",
-        "cont_ag",
-        "subj",
-        "prot",
-        "mean_area",
-        "sd_area", 
-        "05_area",
-        "95_area", 
-        "mean_def",
-        "sd_def",
-        "05_def",
-        "95_def",
-        "mean_e",
-        "sd_e",
-        "05_e",
-        "95_e"
+        "contrast_type",
+        "cell_type", 
+        "condition",
+        "subject",
+        "flow rate",
+        "% gated",
+        "events",
+        "median area",
+        "mode area",
+        "mean area",
+        "sd area",
+        "median deformation",
+        "mode deformation",
+        "mean deformation",
+        "sd deformation",
+        "median E",
+        "mode E",
+        "mean E",
+        "sd E"
     )
     n_sheets = gdata::sheetCount(XL_PATH)
     sheet_names <- gdata::sheetNames(XL_PATH)
     rtdc = list(length=n_sheets-1)
     # skip first sheet -- just contains var names
-    for (s in 2:n_sheets) {
-        sheet = read.xls(XL_PATH, header=T, sheet = s, stringsAsFactors = F)
-        sheetname_split <- unlist(strsplit(sheet_names[s], "_"))
-        cell_type <- rep(sheetname_split[2], nrow(sheet))
-        cont_ag <- rep(sheetname_split[1], nrow(sheet))
-        #fix bad spelling
-        cell_type <- sapply(cell_type, function(x) {ifelse(x == "Neuthrophils", "Neutrophils", x)})
-        subj_prot <- t(sapply(sheet[,1], function(x) {
-            split_list <- unlist(strsplit(x, "-"))
-            subj <- unlist(strsplit(split_list[1], " "))
-            subj <- subj[length(subj)]
-            prot <- split_list[2]
-            subj_prot <- unname(cbind(subj,prot))
-        })) %>%
-            unname %>%
-            as.data.frame %>%
-            set_colnames(c("subj", "prot"))
-        subj <- subj_prot$subj
-        prot <- clean_prots(subj_prot$prot)
-        sheet <- cbind(cell_type, cont_ag, subj, prot, sheet[,2:ncol(sheet)])
+    num_data_sets_by_sheet <- c(6, 6, 8, 8)
+    for (s in 1:n_sheets) {
+        sheet_xl = read.xls(XL_PATH, header=F, sheet = s, stringsAsFactors = F)
+        contrast_type <- sheet_names[s]
+        n_sets = num_data_sets_by_sheet[s]
+        sheet = subset(sheet_xl, V4 != '' & !is.na(as.numeric(V4)))
+        sheet <- cbind(c(rep("all", n_sets*2), rep("monos", n_sets*2), rep("neutros", n_sets*2)), sheet)
+        sheet <- cbind(rep(contrast_type, nrow(sheet)), sheet)
+        sheet[,3] <- rep(c(rep("treatment", n_sets), rep("control", n_sets)), 3)
+        sheet[,-c(1:4)] <- lapply(sheet[,-c(1:4)], as.numeric)
         colnames(sheet) <- col_names
-        rtdc[[s-1]] <- sheet
+        print("")
     }
     rtdc <-do.call(rbind, rtdc)
     require(tidyr)

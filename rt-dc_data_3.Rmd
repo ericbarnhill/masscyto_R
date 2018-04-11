@@ -1,0 +1,159 @@
+---
+title: "RT-DC Data"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+Setup
+
+```{r setup, message=FALSE, error=FALSE, results=FALSE, warning=FALSE, echo=FALSE}
+PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
+knitr::opts_chunk$set(root.dir = PROJ_DIR)
+setwd(PROJ_DIR)
+packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2")
+lapply(packages, require, character.only = T)
+# make all plots on their own  line:
+hook_plot = knitr::knit_hooks$get('plot')
+knitr::knit_hooks$set(plot = function(x, options) paste('\n', hook_plot(x, options), sep = ''))
+require(HDInterval)
+require(rjags)
+
+```
+
+Load and clean data
+```{r}
+source("load_rtdc_3.R")
+XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb_2.xls")
+rtdc_tall <- load_rtdc_3(XL_PATH)
+```
+
+We evaluate whether data is a better fit to normal or log-normal. First view without taking the log:
+
+```{r, fig.height = 3, fig.width = 8, echo=FALSE}
+LOG = F
+knitr::knit_hooks$set(plot = function(x, options) paste('\n', hook_plot(x, options), sep = ''))
+rtdc_boxplot_pooled_controls_treatments(rtdc_tall, "mean_def", "Pooled Controls and Treatments, Def", median, LOG)
+rtdc_boxplot_pooled_controls_treatments(rtdc_tall, "mean_e", "Pooled Controls and Treatments, E", median, LOG)
+```
+
+Deformation looks relatively normal but E is skewed right (towards the top of the chart).
+
+```{r, fig.height = 3, fig.width = 8, echo=FALSE}
+LOG = T
+plot1 <- rtdc_boxplot_pooled_controls_treatments(rtdc_tall, "mean_def", "Pooled Controls and Treatments, Log Def", median, LOG)
+print(plot1)
+plot2 <- rtdc_boxplot_pooled_controls_treatments(rtdc_tall, "mean_e", "Pooled Controls and Treatments, Log E", median, LOG)
+print(plot2)
+```
+This does not seem to have changed much so data will be treated as normal for this initial  study, however it appears to have some clustering.
+
+Explore summary stats of Young's modulus and deformation, keeping each trial separate (in principle the controls can be pooled and will be below). There are many outliers so the effect is clearest using a robust statistic (median) for the central tendency (red dot):
+
+```{r, fig.height = 5, fig.width = 8, echo=FALSE}
+    FUN = median
+    LOG_DEF = F;
+    LOG_E = F;
+    plt_def <- rtdc_exploratory_boxplot(rtdc_tall, "mean_def", "Mean Deformation", FUN, LOG_DEF)
+    print(plt_def)
+    plt_e <- rtdc_exploratory_boxplot(rtdc_tall, "mean_e", "Mean Young's Modulus", FUN, LOG_E)
+    print(plt_e)
+```
+
+Exploring ranges with all controls pooled:
+
+```{r, fig.height = 5, fig.width = 8, echo=FALSE}
+rtdc_boxplot_pooled_controls(rtdc_tall, "mean_def", "Pooled Controls and Treatments, Def", median, LOG_DEF)
+rtdc_boxplot_pooled_controls(rtdc_tall, "mean_e", "Pooled Controls and Treatments, E", median, LOG_E)
+```
+
+Def and E continue to be "mirror images" of each other which is a good reality check that the process is physical. Visually the effects seem relatively clear however the distribution of the controls is highly dispersed, and some contrast agents sets contain one strong outlier.
+
+For a first statistical analysis, to handle the large impact of outliers, the data were regressed against a linear model with a Student's t distribution. JAGS code for the model was:
+
+```{r, fig.height = 5, fig.width = 8}
+student_t_model <- "
+model {
+
+    for (i in 1:length(y)) {
+        y[i] ~ dt(mu[i], tau, k)
+        mu[i] <- beta[cont_ag[i]]
+    }
+    
+    for (k in 1:n_cont_ag) {
+        beta[k] ~ dnorm(mu_ag, tau_ag)
+    }
+    
+    sig ~ dunif(0.001, 1000)
+    tau <- 1 / sig^2
+    k ~ dunif(0.001, 10)
+ 
+    mu_ag ~ dnorm(0, 1 / 10000)
+    sig_ag ~ dunif(0.001, 1000)
+    tau_ag <- 1 / sig_ag^2
+
+}
+"
+```
+As both Young's modulus and deformation behave similarly we use the deformation for this first analysis. As we are not sure if the two cell types are affected similarly by the agents, we analyze Neutrophils alone first. Cleaning and subsetting the data:
+```{r, fig.height = 5, fig.width = 8}
+neutro_subset <- subset(rtdc_tall, measurement == "mean_def" & cell_type == "Neutrophils")
+jags_dataset <- list(
+    y = neutro_subset$value, 
+    cont_ag = neutro_subset$pooled_controls, 
+    n_cont_ag = length(levels(neutro_subset$pooled_controls))
+)
+jags_model <- jags.model(file = textConnection(student_t_model), data = jags_dataset, n.chains = 3)
+update(jags_model, 1e3)
+sim <- coda.samples(model=jags_model, variable.names = c("beta"), n.iter = 5e3)
+gelman <- gelman.diag(sim)
+csim <- as.mcmc(do.call(rbind, sim))
+```
+Chains look good:
+```{r, fig.height = 5, fig.width = 8}
+plot(sim)
+```
+Gelman diagnostic looks good:
+```{r, fig.height = 5, fig.width = 8}
+print(gelman)
+```
+Plot densities and contrasts:
+```{r, fig.height = 5, fig.width = 8, echo = FALSE}
+control_samples <- csim[,1]
+dotarem_samples  <- csim[,2]
+gadovist_samples  <- csim[,3]
+gdcl3_samples <- csim[,4]
+magnevist_samples <- csim[,5]
+densities <- data.frame(control_samples, dotarem_samples, gadovist_samples, gdcl3_samples, magnevist_samples)
+names(densities) <- c("Control", "Dotarem", "Gadovist", "GdCl3", "Magnevist")
+densities_tidy <- gather(densities, "Condition", "Value")
+# plot densities
+plt1 <- ggplot(densities_tidy) +
+    geom_histogram(aes(x = Value), bins=30) +
+    facet_grid(. ~ Condition) +
+    ggtitle("Densities")
+print(plt1)
+# plot contrasts
+dotarem_contrasts <- dotarem_samples - control_samples
+gadovist_contrasts <- gadovist_samples - control_samples
+gdcl3_contrasts <- gdcl3_samples - control_samples
+magnevist_contrasts <- magnevist_samples - control_samples
+contrasts <- data.frame(dotarem_contrasts, gadovist_contrasts, gdcl3_contrasts, magnevist_contrasts)
+names(contrasts) <- c("Dotarem vs Control", "Gadovist vs Control", "GdCl3 vs Control", "Magnevist vs Control")
+contrasts_tidy <- gather(contrasts, "Contrast", "Value")
+# plot
+plt2 <- ggplot(contrasts_tidy) +
+    geom_histogram(aes(x = Value), bins=30) +
+    facet_grid(. ~ Contrast) +
+    ggtitle("Contrasts")
+print(plt2)
+```
+The contrast densities seem firmly centered on zero, nevertheless we show the high-density intervals in a table
+```{r, fig.height = 5, fig.width = 8}
+print("Densities:")
+print(hdi(densities))
+print("Contrasts:")
+print(hdi(contrasts))
+```
+TO DO:
+- It is surprising that the HDI of the control is comparable to (or less than) the HDIs of some of the contrast agents. It should be much wider, and presumably this is a shrinkage effect, but needs to be investigated further.

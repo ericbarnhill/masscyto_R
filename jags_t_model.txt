@@ -1,0 +1,20 @@
+model {
+
+    for (i in 1:length(y)) {
+        y[i] ~ dt(mu[i], tau, k)
+        mu[i] <- beta0 + beta1[cont_ag[i]]
+    }
+    
+    for (k in 1:n_cont_ag) {
+        beta1[k] ~ dnorm(mu_ag, tau_ag)
+    }
+    
+    sig ~ dunif(0.001, 1000)
+    tau <- 1 / sig^2
+    k ~ dunif(0.001, 10)
+ 
+    mu_ag ~ dnorm(0, 1 / 10000)
+    sig_ag ~ dunif(0.001, 1000)
+    tau_ag <- 1 / sig_pix^2
+
+}
