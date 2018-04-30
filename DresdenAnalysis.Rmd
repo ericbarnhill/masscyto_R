@@ -1,0 +1,175 @@
+---
+title: "Dresden analysis"
+author: "Shravan Vasishth"
+date: "4/30/2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(brms)
+theme_set(theme_default())
+```
+
+## Load and preprocess data
+
+```{r echo=FALSE,include=FALSE}
+dat<-read.table("rtdc.txt",header=TRUE)
+unique(dat$Subject)
+
+summary(dat)
+
+## labeling is odd because each contrast agent has two labels, control and treatment, whereas control agent is by definition a single level: 
+xtabs(~Contrast_Agent+Protocol,dat)
+
+controlrows<-dat[which(dat$Protocol=="Control"),]
+trtmtrows<-dat[which(dat$Protocol!="Control"),]
+
+#trtmtrows$Contrast_Agent
+
+summary(trtmtrows)
+summary(controlrows)
+
+controlrows$Agent<-factor("Control")
+trtmtrows$Agent<-trtmtrows$Contrast_Agent
+
+dat2<-rbind(controlrows,trtmtrows)
+summary(dat2)
+
+
+## relevel factors:
+dat2$Agent<-factor(dat2$Agent,levels=c("Control","Dotarem","Magnevist","Gadovist","GdCl3"))
+## treatment contrasts:
+contrasts(dat2$Agent)
+
+library(MASS)
+
+## sliding contrasts:
+contrasts(dat2$Agent)<-contr.sdif(5)
+contrasts(dat2$Agent)
+
+## Do the contrast coding manually:
+dat2$Dot_C<-ifelse(dat2$Agent=="Control",-1,ifelse(dat2$Agent=="Dotarem",1,0))
+dat2$Mag_Dot<-ifelse(dat2$Agent=="Dotarem",-1,ifelse(dat2$Agent=="Magnevist",1,0))
+dat2$Gad_Mag<-ifelse(dat2$Agent=="Magnevist",-1,ifelse(dat2$Agent=="Gadovist",1,0))
+dat2$GdCl3_Gad<-ifelse(dat2$Agent=="Gadovist",-1,ifelse(dat2$Agent=="GdCl3",1,0))
+                                
+## separate data by cell type:                            
+MonoE<-subset(dat2,Cell_Type=="Monocytes" & Statistic=="Mean"  & Parameter=="E")
+NeutroE<-subset(dat2,Cell_Type=="Neutrophils" & Statistic=="Mean" & Parameter=="E")
+
+MonoA<-subset(dat2,Cell_Type=="Monocytes" & Statistic=="Mean"  & Parameter=="Area")
+NeutroA<-subset(dat2,Cell_Type=="Neutrophils" & Statistic=="Mean" & Parameter=="Area")
+
+MonoD<-subset(dat2,Cell_Type=="Monocytes" & Statistic=="Mean"  & Parameter=="Deformation")
+NeutroD<-subset(dat2,Cell_Type=="Neutrophils" & Statistic=="Mean" & Parameter=="Deformation")
+
+MonoE$Parameter<-factor(MonoE$Parameter)
+NeutroE$Parameter<-factor(NeutroE$Parameter)
+
+MonoA$Parameter<-factor(MonoA$Parameter)
+NeutroA$Parameter<-factor(NeutroA$Parameter)
+
+MonoD$Parameter<-factor(MonoD$Parameter)
+NeutroD$Parameter<-factor(NeutroD$Parameter)
+```
+
+In the preprocessing (not printed out in this pdf), we separate the data from the two cell types and set up a sliding contrast coding to compare the successive effects of
+
+- Dot(arem) vs Control 
+- Mag(nevist) vs Dot
+- Gad(ovist) vs Mag
+- GdC13 vs Gad
+
+A positive coefficient for a Y vs X comparison implies that the value for Y is higher than for X. 
+
+# Area as dependent measure
+
+## Set up priors
+
+We will use two sets of priors: Normal(0,1) or Cauchy(0,10). The latter allows extreme values.
+
+```{r}
+priors_normal <- c(set_prior("normal(0, 10)", class = "Intercept"),
+            set_prior("normal(0, 1)", class = "b"),
+            set_prior("normal(0, 1)", class = "sd"),
+            set_prior("normal(0, 1)", class = "sigma"),set_prior("lkj(2)", class = "cor")
+            )
+
+priors_cauchy <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
+            set_prior("cauchy(0, 1)", class = "b"),
+            set_prior("cauchy(0, 1)", class = "sd"),
+            set_prior("cauchy(0, 1)", class = "sigma"),set_prior("lkj(2)", class = "cor")
+            )
+```
+
+## Using Cauchy priors
+
+As there are more conservative, I used Cauchy priors in preference to Normal priors, but the outcome is not dependent on the priors. 
+
+```{r cache=TRUE, include=FALSE}
+mMonoA <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
+              data = MonoA, family = gaussian(), prior = priors_cauchy,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.99))
+
+## posteriors
+mMonoApost<-posterior_samples(mMonoA, "^b")
+#dim(mMonoApost)
+```
+
+Posterior probabilities of the parameter being positive:
+
+```{r include=TRUE, print=TRUE}
+(Dot_CMonoA<-round(mean(mMonoApost[,2]>0),2))
+(Mag_DotMonoA<-round(mean(mMonoApost[,3]>0),2))
+(Gad_MagMonoA<-round(mean(mMonoApost[,4]>0),2))
+(GdCl3_GadMonoA<-round(mean(mMonoApost[,5]>0),2))
+```
+
+```{r message=FALSE,warning=FALSE}
+stanplot(mMonoA, type="hist",pars=c("^b","^sd","sigma"))
+```
+
+We see some weak evidence for Dot having higher values than Control, and Mag having higher values than Dot, and Gad being higher than Mag. But GdCl3 seems to be *lower* than Gad.
+
+```{r cache=TRUE,include=FALSE}
+mNeutroA <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
+                data = NeutroA, family = gaussian(), prior = priors_cauchy,
+                iter = 2000, chains = 4, control = list(adapt_delta = 0.99))
+
+## posteriors
+mNeutroApost<-posterior_samples(mNeutroA, "^b")
+```
+
+Posterior probabilities of the parameter being positive:
+
+```{r include=TRUE}
+(Dot_CNeutroA<-round(mean(mNeutroApost[,2]>0),2))
+(Mag_DotNeutroA<-round(mean(mNeutroApost[,3]>0),2))
+(Gad_MagNeutroA<-round(mean(mNeutroApost[,4]>0),2))
+(GdCl3_GadNeutroA<-round(mean(mNeutroApost[,5]>0),2))
+```
+
+```{r message=FALSE,warning=FALSE}
+stanplot(mNeutroA, type="hist",pars=c("^b","^sd","sigma"))
+```
+
+Very similar results from Neurophils.
+
+# Conclusion
+
+Monocytes: The probability (given data and model) that
+
+-  Dot has a higher value than control:  `r Dot_CMonoA`
+- Mag has a higher value than Dot: `r Mag_DotMonoA`
+- Gad has a higher value than Mag: `r Gad_MagMonoA`
+- GdCl3 has a higher value than Gad: `r GdCl3_GadMonoA`
+
+Neutrophils: The probability (given data and model) that
+
+-  Dot has a higher value than control:  `r Dot_CNeutroA`
+- Mag has a higher value than Dot: `r Mag_DotNeutroA`
+- Gad has a higher value than Mag: `r Gad_MagNeutroA`
+- GdCl3 has a higher value than Gad: `r GdCl3_GadNeutroA`
+
+So, I would conclude that given that we have only 5 people's data, there might be grounds for concluding that we can use different contrast agents on Monocytes and Neutrophils to study the effect of the agents on the cells. Only the dependent measure Area shows the expected increase by contrast agent (ordered from least toxic to most toxic). The only thing that may be odd is that the most toxic control, GdCl3, does not have higher values than Gad. If anything, Gad seems to have higher values; so Gad seems to be even more toxic than GdC13? Not sure what to make of that.
