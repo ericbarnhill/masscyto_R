@@ -1,0 +1,153 @@
+---
+title: "RT-DC analysis with Shravan"
+output: html_notebook
+---
+
+```{r setup, message=FALSE, echo=FALSE}
+PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
+XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb_2.xls")
+knitr::opts_chunk$set(root.dir = PROJ_DIR)
+setwd(PROJ_DIR)
+packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2")
+lapply(packages, require, character.only = T)
+```
+
+Load data into a data frame.
+
+```{r organize_data, echo=FALSE}
+load_data <- function(path) {
+    col_names <- c(
+        "Subject",
+        "Date",
+        "Unique_ID",
+        "Cell_Type",
+        "Contrast_Agent",
+        "Protocol",
+        "Parameter",
+        "Statistic",
+        "Value"
+    )
+    param_names <- c(rep("Area",4), rep("Deformation",4), rep("E",4))
+    stat_names <- rep(c("Mean", "SD", "5%", "95%"),3)
+    n_sheets = gdata::sheetCount(XL_PATH)
+    sheet_names <- gdata::sheetNames(XL_PATH)
+    rtdc = list(length=n_sheets-1)
+    for (s in 1:n_sheets) {
+        sheet = read.xls(XL_PATH, header=T, sheet = s, stringsAsFactors = F)
+        
+        # get Cell_Type and Contrast_Agent
+        sheetname_split <- unlist(strsplit(sheet_names[s], "_"))
+        cell_type <- rep(sheetname_split[2], nrow(sheet))
+        cont_ag <- rep(sheetname_split[1], nrow(sheet))
+        
+        # fix bad spelling
+        cell_type <- unname(sapply(cell_type, function(x) {ifelse(x == "Neuthrophils", "Neutrophils", x)}))
+        
+        # get Date, Subject, Protocol (control or treatment)
+        date_subj_prot <- t(sapply(sheet[,1], function(x) {
+            split_list <- unlist(strsplit(x, "_"))
+            dates <- split_list[1]
+            subj <- split_list[2]
+            prot <- split_list[3]
+            date_subj_prot <- unname(cbind(dates,subj,prot))
+        }))
+        
+        # split subject from protocol
+        date_subj_prot <- date_subj_prot %>%
+            unname %>%
+            as.data.frame %>%
+            set_colnames(c("date", "subj", "prot"))
+        date <- date_subj_prot$date
+        subj <- as.character(date_subj_prot$subj)
+        prot <- as.character(clean_prots(date_subj_prot$prot))
+        
+        # split Date from colon
+        date <- sapply(date, function(x) {
+            split_date <- unlist(strsplit(as.character(x), ' '))
+            if (length(split_date) > 1) {
+                date = split_date[2]
+            }
+        })
+        # make unique ID
+        uniqueID <- unname(mapply(FUN=function(x,y,z,t){paste0(x,y,z,t)}, 
+                                  as.character(subj), as.character(date), as.character(cell_type), as.character(cont_ag)))
+        
+        # bind sheet of clean labels, make tall format
+        sheet_clean_labels <- cbind(subj, date, uniqueID, cell_type, cont_ag, prot)
+        n_vals <- ncol(sheet) - 1
+        labels_tall <- sheet_clean_labels[rep(1:nrow(sheet_clean_labels), each=n_vals),]
+
+        # convert values to tall format
+        values_tall <- apply(X = sheet[,2:ncol(sheet)], MARGIN = 1, FUN = function(rw) {
+            n_vals <- length(rw)
+            vals_tall <- rbind(param_names, stat_names, as.vector(rw))
+        })
+        # somehow this works
+        values_tall <- t(matrix(values_tall,3,length(values_tall)/3))
+        
+        # bind tall labels and tall values
+        data_tall <- cbind(labels_tall, values_tall)
+        data_tall[,-nrow(data_tall)] <- as.character(data_tall[,-nrow(data_tall)])
+        colnames(data_tall) <- col_names
+        rtdc[[s]] <- as.data.frame(data_tall, stringsAsFactors = FALSE)
+    }
+    rtdc <-do.call(rbind, rtdc)
+    cols_to_factor = colnames(rtdc)[-ncol(data_tall)]
+    rtdc[cols_to_factor] <- lapply(rtdc[cols_to_factor], function(x) {factor(unlist(x))})
+    rtdc$Value <- as.numeric(rtdc$Value)
+    rownames(rtdc) <- c()
+    return(rtdc)    
+}
+
+clean_prots <- function(prots_raw) {
+    control_entries <- c("Control", "control", "cntl", "Contrl", "ctl", "Ctrol", "cotrl", "Ctrl", "Ctr", "Cntrol", "cotnrol", 
+                         "control-", "Control2")
+    #gdcl3_entries <- c("GdCl3")
+    #gadovist_entries <- c("Gadovist", "Gadov")
+    #dotarem_entries <- c("Dotarem", "Dota")
+    #magnevist_entries <- c("Magnevist", "Magnevist_I", "Magnevist_II", "Magnevist_III")
+    prots <- sapply(as.character(prots_raw), function(x) {
+        x_split_1 <- unlist(strsplit(x, " "))
+        x_split_2 <- unlist(strsplit(x_split_1[1], "-"))
+        x <- x_split_2[1]
+        if (x %in% control_entries) {
+            x <- "Control"
+        } else {
+            x <- "Treatment"
+        }
+        #} else if (x %in% gadovist_entries) {
+        #    x <- "Gadovist"
+        #} else if (x %in% dotarem_entries) {
+        #    x <- "Dotarem"
+        #} else if (x %in% magnevist_entries) {
+        #    x <- "Magnevist"
+        #} else if (x %in% gdcl3_entries) {
+        #    x <- "GdCl3"
+        #} else {
+        #    print("ERROR: entry not labeled properly as control or contrast agent")
+        #}
+        return(x)
+    })
+    prots_2 <- prots %>%
+        as.factor %>%
+        unname
+    return(prots_2)
+}
+
+rtdc <- load_data(XL_PATH)
+```
+
+Plot pairs against each other:
+
+```{r pairwise_plots, echo=FALSE}
+
+rtdc_subset <- subset(rtdc, Parameter == "E" & Statistic == "Mean")
+rtdc_wide <- spread(data = rtdc_subset, key = Protocol, value=Value)
+
+plt <- ggplot(rtdc_wide) +
+        geom_point(aes(x=Control,y=Treatment,col=Subject)) +
+        ggtitle("Mean Young's Modulus")
+print(plt)
+
+```
+

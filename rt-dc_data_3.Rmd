@@ -105,15 +105,15 @@ jags_dataset <- list(
 )
 jags_model <- jags.model(file = textConnection(student_t_model), data = jags_dataset, n.chains = 3)
 update(jags_model, 1e3)
-sim <- coda.samples(model=jags_model, variable.names = c("beta"), n.iter = 5e3)
+sim <- coda.samples(model=jags_model, variable.names = c("beta", "tau", "k", "mu_ag", "tau_ag"), n.iter = 5e3)
 gelman <- gelman.diag(sim)
 csim <- as.mcmc(do.call(rbind, sim))
 ```
-Chains look good:
-```{r, fig.height = 5, fig.width = 8}
+Chains look overall good, except tau_ag looks sparse:
+```{r, fig.height = 10, fig.width = 8}
 plot(sim)
 ```
-Gelman diagnostic looks good:
+Gelman diagnostic looks good besides tau_ag:
 ```{r, fig.height = 5, fig.width = 8}
 print(gelman)
 ```
@@ -157,3 +157,4 @@ print(hdi(contrasts))
 ```
 TO DO:
 - It is surprising that the HDI of the control is comparable to (or less than) the HDIs of some of the contrast agents. It should be much wider, and presumably this is a shrinkage effect, but needs to be investigated further.
+- tau_ag is not converging, should I rethink this aspect of the model (assuming this is a model worth keeping?)
