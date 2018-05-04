@@ -70,7 +70,7 @@ NeutroE$Parameter<-factor(NeutroE$Parameter)
 MonoA$Parameter<-factor(MonoA$Parameter)
 NeutroA$Parameter<-factor(NeutroA$Parameter)
 
-MonoD$Parameter<-factor(MonoD$Parameter)
+MonoD$Parameter<-factor(MonoE$Parameter)
 NeutroD$Parameter<-factor(NeutroD$Parameter)
 ```
 
@@ -106,6 +106,8 @@ priors_cauchy <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
 ## Using Cauchy priors
 
 As there are more conservative, I used Cauchy priors in preference to Normal priors, but the outcome is not dependent on the priors. 
+
+# Area
 
 ```{r cache=TRUE, include=FALSE}
 mMonoA <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
@@ -156,7 +158,110 @@ stanplot(mNeutroA, type="hist",pars=c("^b","^sd","sigma"))
 
 Very similar results from Neurophils.
 
-# Conclusion
+
+# Deformation
+
+```{r cache=TRUE, include=FALSE}
+mMonoD <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
+              data = MonoD, family = gaussian(), prior = priors_cauchy,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.99))
+
+## posteriors
+mMonoDpost<-posterior_samples(mMonoD, "^b")
+#dim(mMonoDpost)
+```
+
+Posterior probabilities of the parameter being positive:
+
+```{r include=TRUE, print=TRUE}
+(Dot_CMonoD<-round(mean(mMonoDpost[,2]>0),2))
+(Mag_DotMonoD<-round(mean(mMonoDpost[,3]>0),2))
+(Gad_MagMonoD<-round(mean(mMonoDpost[,4]>0),2))
+(GdCl3_GadMonoD<-round(mean(mMonoDpost[,5]>0),2))
+```
+
+```{r message=FALSE,warning=FALSE}
+stanplot(mMonoD, type="hist",pars=c("^b","^sd","sigma"))
+```
+
+[Analysis of deformation to come]
+
+```{r cache=TRUE,include=FALSE}
+mNeutroD <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
+                data = NeutroD, family = gaussian(), prior = priors_cauchy,
+                iter = 2000, chains = 4, control = list(adapt_delta = 0.99))
+
+## posteriors
+mNeutroDpost<-posterior_samples(mNeutroD, "^b")
+```
+
+Posterior probabilities of the parameter being positive:
+
+```{r include=TRUE}
+(Dot_CNeutroD<-round(mean(mNeutroDpost[,2]>0),2))
+(Mag_DotNeutroD<-round(mean(mNeutroDpost[,3]>0),2))
+(Gad_MagNeutroD<-round(mean(mNeutroDpost[,4]>0),2))
+(GdCl3_GadNeutroD<-round(mean(mNeutroDpost[,5]>0),2))
+```
+
+```{r message=FALSE,warning=FALSE}
+stanplot(mNeutroD, type="hist",pars=c("^b","^sd","sigma"))
+```
+
+
+# Young's Modulus
+
+```{r cache=TRUE, include=FALSE}
+mMonoE <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
+              data = MonoE, family = gaussian(), prior = priors_cauchy,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.99))
+
+## posteriors
+mMonoEpost<-posterior_samples(mMonoE, "^b")
+#dim(mMonoEpost)
+```
+
+Posterior probabilities of the parameter being positive:
+
+```{r include=TRUE, print=TRUE}
+(Dot_CMonoE<-round(mean(mMonoEpost[,2]>0),2))
+(Mag_DotMonoE<-round(mean(mMonoEpost[,3]>0),2))
+(Gad_MagMonoE<-round(mean(mMonoEpost[,4]>0),2))
+(GdCl3_GadMonoE<-round(mean(mMonoEpost[,5]>0),2))
+```
+
+```{r message=FALSE,warning=FALSE}
+stanplot(mMonoE, type="hist",pars=c("^b","^sd","sigma"))
+```
+
+[Analysis of deformation to come]
+
+```{r cache=TRUE,include=FALSE}
+mNeutroE <- brm(formula = Value ~ Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad+ (1+Dot_C+Mag_Dot +Gad_Mag+GdCl3_Gad | Subject),
+                data = NeutroE, family = gaussian(), prior = priors_cauchy,
+                iter = 2000, chains = 4, control = list(adapt_delta = 0.99))
+
+## posteriors
+mNeutroEpost<-posterior_samples(mNeutroE, "^b")
+```
+
+Posterior probabilities of the parameter being positive:
+
+```{r include=TRUE}
+(Dot_CNeutroE<-round(mean(mNeutroEpost[,2]>0),2))
+(Mag_DotNeutroE<-round(mean(mNeutroEpost[,3]>0),2))
+(Gad_MagNeutroE<-round(mean(mNeutroEpost[,4]>0),2))
+(GdCl3_GadNeutroE<-round(mean(mNeutroEpost[,5]>0),2))
+```
+
+```{r message=FALSE,warning=FALSE}
+stanplot(mNeutroE, type="hist",pars=c("^b","^sd","sigma"))
+```
+
+
+## Conclusion
+
+# Area
 
 Monocytes: The probability (given data and model) that
 
@@ -171,5 +276,37 @@ Neutrophils: The probability (given data and model) that
 - Mag has a higher value than Dot: `r Mag_DotNeutroA`
 - Gad has a higher value than Mag: `r Gad_MagNeutroA`
 - GdCl3 has a higher value than Gad: `r GdCl3_GadNeutroA`
+
+# Deformation
+
+Monocytes: The probability (given data and model) that
+
+-  Dot has a higher value than control:  `r Dot_CMonoD`
+- Mag has a higher value than Dot: `r Mag_DotMonoD`
+- Gad has a higher value than Mag: `r Gad_MagMonoD`
+- GdCl3 has a higher value than Gad: `r GdCl3_GadMonoD`
+
+Neutrophils: The probability (given data and model) that
+
+-  Dot has a higher value than control:  `r Dot_CNeutroD`
+- Mag has a higher value than Dot: `r Mag_DotNeutroD`
+- Gad has a higher value than Mag: `r Gad_MagNeutroD`
+- GdCl3 has a higher value than Gad: `r GdCl3_GadNeutroD`
+
+# Young's Modulus
+
+Monocytes: The probability (given data and model) that
+
+-  Dot has a higher value than control:  `r Dot_CMonoE`
+- Mag has a higher value than Dot: `r Mag_DotMonoE`
+- Gad has a higher value than Mag: `r Gad_MagMonoE`
+- GdCl3 has a higher value than Gad: `r GdCl3_GadMonoE`
+
+Neutrophils: The probability (given data and model) that
+
+-  Dot has a higher value than control:  `r Dot_CNeutroE`
+- Mag has a higher value than Dot: `r Mag_DotNeutroE`
+- Gad has a higher value than Mag: `r Gad_MagNeutroE`
+- GdCl3 has a higher value than Gad: `r GdCl3_GadNeutroE`
 
 So, I would conclude that given that we have only 5 people's data, there might be grounds for concluding that we can use different contrast agents on Monocytes and Neutrophils to study the effect of the agents on the cells. Only the dependent measure Area shows the expected increase by contrast agent (ordered from least toxic to most toxic). The only thing that may be odd is that the most toxic control, GdCl3, does not have higher values than Gad. If anything, Gad seems to have higher values; so Gad seems to be even more toxic than GdC13? Not sure what to make of that.
