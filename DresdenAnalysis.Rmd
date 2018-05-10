@@ -310,3 +310,92 @@ Neutrophils: The probability (given data and model) that
 - GdCl3 has a higher value than Gad: `r GdCl3_GadNeutroE`
 
 So, I would conclude that given that we have only 5 people's data, there might be grounds for concluding that we can use different contrast agents on Monocytes and Neutrophils to study the effect of the agents on the cells. Only the dependent measure Area shows the expected increase by contrast agent (ordered from least toxic to most toxic). The only thing that may be odd is that the most toxic control, GdCl3, does not have higher values than Gad. If anything, Gad seems to have higher values; so Gad seems to be even more toxic than GdC13? Not sure what to make of that.
+
+# Analysis of Control vs Treatment
+
+```{r}
+load("df_differences.RData")
+head(rtdc_diff)
+diffdat<-subset(rtdc_diff,Parameter=="E" & Statistic=="Mean")
+diffMono<-subset(diffdat,Cell_Type=="Monocytes")
+diffNeutro<-subset(diffdat,Cell_Type=="Neutrophils")
+summary(diffMono)
+summary(diffNeutro)
+```
+
+```{r}
+library(lattice)
+xyplot(diff~Subject|Cell_Type,diffdat)
+```
+
+```{r}
+priors_normal_diff <- c(set_prior("normal(0, 10)", class = "Intercept"),
+            set_prior("normal(0, 1)", class = "sd"),
+            set_prior("normal(0, 1)", class = "sigma"))
+
+priors_cauchy_diff <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
+            set_prior("cauchy(0, 10)", class = "sd"),
+            set_prior("cauchy(0, 10)", class = "sigma"))
+```
+
+```{r cache=TRUE}
+mdiffMonoE <- brm(formula = diff ~ 1+(1 | Subject),
+              data = diffMono, family = gaussian(), prior = priors_cauchy_diff,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+mdiffNeutroE <- brm(formula = diff ~ 1+(1 | Subject),
+              data = diffMono, family = gaussian(), prior = priors_cauchy_diff,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+```
+
+The posteriors don't show convincing evidence for any difference in either cell:
+
+```{r}
+## posteriors
+mdiffMonoEpost<-posterior_samples(mdiffMonoE, "Intercept")
+mean(mdiffMonoEpost>0)
+
+## posteriors
+mdiffNeutroEpost<-posterior_samples(mdiffNeutroE, "Intercept")
+mean(mdiffNeutroEpost>0)
+```
+
+Graphical summaries:
+```{r message=FALSE,warning=FALSE}
+stanplot(mdiffMonoE, type="hist",pars=c("Intercept","^sd","sigma"))
+
+stanplot(mdiffNeutroE, type="hist",pars=c("Intercept","^sd","sigma"))
+```
+
+## Combined cells
+
+Maybe it makes sense to have both cells' data combined and just control for Cell differences:
+
+```{r}
+priors_normal_diff_cell <- c(set_prior("normal(0, 10)", class = "Intercept"),
+            set_prior("normal(0, 1)", class = "b"),
+            set_prior("normal(0, 1)", class = "sd"),
+            set_prior("normal(0, 1)", class = "sigma"),set_prior("lkj(2)", class = "cor")
+            )
+
+priors_cauchy_diff_cell <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
+            set_prior("cauchy(0, 10)", class = "b"),
+            set_prior("cauchy(0, 10)", class = "sd"),
+            set_prior("cauchy(0, 10)", class = "sigma"),set_prior("lkj(2)", class = "cor")
+            )
+```
+
+```{r}
+mdiffE <- brm(formula = diff ~ 1+Cell_Type+(1+Cell_Type | Subject),
+              data = diffdat, family = gaussian(), prior = priors_cauchy_diff_cell,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+stanplot(mdiffE, type="trace",pars=c("Intercept","^b","^sd","sigma"))
+
+stanplot(mdiffE, type="hist",
+         pars=c("Intercept","^b","^sd","sigma"))
+```
+
+In Young's modulus, I don't see any convincing evidence for an effect in either the overall effect (the intercept), or in individual subjects' effects, except Philip, whose intercept seems to be positive; but there isn't a lot of data from Philip; Gela has the most data and he/she shows no effects.
+
