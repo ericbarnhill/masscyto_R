@@ -315,18 +315,20 @@ So, I would conclude that given that we have only 5 people's data, there might b
 
 ```{r}
 load("df_differences.RData")
-head(rtdc_diff)
+#head(rtdc_diff)
 diffdat<-subset(rtdc_diff,Parameter=="E" & Statistic=="Mean")
 diffMono<-subset(diffdat,Cell_Type=="Monocytes")
 diffNeutro<-subset(diffdat,Cell_Type=="Neutrophils")
-summary(diffMono)
-summary(diffNeutro)
+#summary(diffMono)
+#summary(diffNeutro)
 ```
 
 ```{r}
 library(lattice)
 xyplot(diff~Subject|Cell_Type,diffdat)
 ```
+
+Set priors (we will use cauchy priors):
 
 ```{r}
 priors_normal_diff <- c(set_prior("normal(0, 10)", class = "Intercept"),
@@ -399,3 +401,83 @@ stanplot(mdiffE, type="hist",
 
 In Young's modulus, I don't see any convincing evidence for an effect in either the overall effect (the intercept), or in individual subjects' effects, except Philip, whose intercept seems to be positive; but there isn't a lot of data from Philip; Gela has the most data and he/she shows no effects.
 
+# Looking at differences by Contrast Agent
+
+Angela wrote: 
+
+- The main variable to be compared is the Young´s modulus (E).
+
+Eric also wrote:
+
+- we were interested in a further analysis that had no control group by itself, but rather four groups, one for each contrast agent (Gad, Dot, Mag, GdCl3), whose measurement points are the difference between each subject's control and treatment measurements for that contrast agent. So, the measurement point for Angela in the Gad group is (Angela-Gad-treatment minus Angela-Gad-control)  and the measurement point for Markus in Dotarem is (Markus-Dot-treatment minus Markus-Dot-control). 
+
+I implement this analysis next:
+
+```{r}
+diffdat<-subset(rtdc_diff,Parameter=="E" & Statistic=="Mean")
+
+## Do the contrast coding manually:
+diffdat$Mag_Dot<-ifelse(diffdat$Contrast_Agent=="Dotarem",-1,
+                        ifelse(diffdat$Contrast_Agent=="Magnevist",1,0))
+diffdat$Gad_Mag<-ifelse(diffdat$Contrast_Agent=="Magnevist",-1,
+                        ifelse(diffdat$Contrast_Agent=="Gadovist",1,0))
+diffdat$GdCl3_Gad<-ifelse(diffdat$Contrast_Agent=="Gadovist",-1,
+                          ifelse(diffdat$Contrast_Agent=="GdCl3",1,0))
+
+diffMono<-subset(diffdat,Cell_Type=="Monocytes")
+diffNeutro<-subset(diffdat,Cell_Type=="Neutrophils")
+```
+
+## Monocytes
+
+```{r}
+priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
+            set_prior("cauchy(0, 10)", class = "b"),
+            set_prior("cauchy(0, 10)", class = "sd"),
+            set_prior("cauchy(0, 10)", class = "sigma")
+            )
+
+
+mdiffMonoContrAgt_E <- brm(formula = diff ~ 1+Mag_Dot+Gad_Mag+GdCl3_Gad+
+                (1| Subject),
+              data = diffMono, family = gaussian(), prior = priors_cauchy_diff2,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+stanplot(mdiffMonoContrAgt_E, type="trace",pars=c("Intercept","^b","^sd","sigma"))
+
+stanplot(mdiffMonoContrAgt_E, type="hist",pars=c("Intercept","^b","^sd","sigma"))
+
+mMonoContrAgtdiffEpost<-posterior_samples(mdiffMonoContrAgt_E, "^b")
+```
+
+For Monocytes, one could argue that there is some *weak* evidence for increasing differences by Contrast Agent:
+
+
+```{r}
+mean(mMonoContrAgtdiffEpost$b_Mag_Dot>0)
+mean(mMonoContrAgtdiffEpost$b_Gad_Mag>0)
+mean(mMonoContrAgtdiffEpost$b_GdCl3_Gad>0)
+```
+
+## Neutrophils
+
+```{r}
+mdiffNeutroContrAgt_E <- brm(formula = diff ~ 1+Mag_Dot+Gad_Mag+GdCl3_Gad+
+                (1| Subject),
+              data = diffNeutro, family = gaussian(), prior = priors_cauchy_diff2,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+stanplot(mdiffNeutroContrAgt_E, type="trace",pars=c("Intercept","^b","^sd","sigma"))
+
+stanplot(mdiffNeutroContrAgt_E, type="hist",pars=c("Intercept","^b","^sd","sigma"))
+
+mNeutroContrAgtdiffEpost<-posterior_samples(mdiffNeutroContrAgt_E, "^b")
+```
+
+For Neutrophils, there isn't much evidence for increasing differences by Contrast Agent:
+
+```{r}
+mean(mNeutroContrAgtdiffEpost$b_Mag_Dot>0)
+mean(mNeutroContrAgtdiffEpost$b_Gad_Mag>0)
+mean(mNeutroContrAgtdiffEpost$b_GdCl3_Gad>0)
+```
