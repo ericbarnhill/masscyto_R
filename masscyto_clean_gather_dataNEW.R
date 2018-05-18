@@ -34,7 +34,9 @@ clean_gather_data <- function(mass_cyto) {
     mass_cyto_tall$Experiment <- as.character(mass_cyto_tall$Experiment)
     mass_cyto_tall$Experiment[which(mass_cyto_tall$Experiment=="repeat 2")] <- "2"
     mass_cyto_tall$Experiment <- factor(mass_cyto_tall$Experiment)
-    mass_cyto_tall$Concentration <- factor(mass_cyto_tall$Concentration)
+    #2018-03-15 treat concentration as  numeric
+    #mass_cyto_tall$Concentration <- factor(mass_cyto_tall$Concentration)
+    mass_cyto_tall$Concentration <- as.numeric(mass_cyto_tall$Concentration)
     headers_split <- unlist(strsplit(mass_cyto_tall$measurement, '__'))
     CellType <- headers_split[seq(1,length(headers_split),2)]
     MeasurementType <- headers_split[seq(2,length(headers_split),2)]

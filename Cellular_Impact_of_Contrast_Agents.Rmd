@@ -1,0 +1,552 @@
+---
+title: "Cellular Impact of Contrast Agents"
+author: "Angela Ariza de Schellenberger, Eric Barnhill and Shravan Vasishth"
+date: "2018.05.14"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
+XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb_2.xls")
+knitr::opts_chunk$set(root.dir = PROJ_DIR)
+setwd(PROJ_DIR)
+packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", 'HDInterval')
+lapply(packages, require, character.only = T)
+theme_set(theme_default())
+```
+
+# Overview
+
+This study evaluated whether novel cell measurement technologies showed differences in cell behavior between three widely used MRI contrast agents: Gadovist, Magnevist and Dotarem. These three agents are considered to have differing levels of safety and toxicity and further insight into the relative biological impact of these agents could have immediate impact for MRI protocols worldwide. To evalaute the relative toxicitiy of these agents we investigated whether we could detect differences between their effects on varying kinds of human cells. We measured differences with two different measurement techniques: Time-Of-Flight Mass Cytometry (CyTOF) and Realtime Deformation of Cells (RT-DC).
+
+While these methods produce many thousands of output points, many of the analyses recently published with these novel technologies take point estimates on central tendency measures (such as mean or median) of sparse data sets to estimate the statistical significance of effects. These estimates are likely to be underpowered and to overstate effects, (Vashishth, Gelman et al.), fail to accurately estimate uncertainty or correlations between parameters (when they can even be estimated), and take no advantage of the distribution of thousands of data points available with each measurement. 
+
+To optimally address these research questions, we developed an up-to-date, Bayesian statistical approach that can be applied to both of these new cell-measurement technologies as well as others. This approach incorporates quantile summary statistics to more fully estimate the distribution of individual measurements; applies orthogonal contrast codings; handles more fully specified models even with relatively sparse data, and produces a probability mass that enables posterior evaluation of the uncertainty of parameter estimates. Particularly with novel technologies and pilot studies, evaluation of uncertainty in parameter estimates is key to robust and reproducible research, and we provide a method of delivering both estimate and uncertainty that is straightforward to use, code and interpret, that may be useful for a wide range of biological measurement tools.
+
+# CyTOF
+
+Time-Of-Flight Mass Cytometry (CyTOF) measures spectral response of different cell types at the cellular level. Here the research question was whether there were differences in performance between three clinically used Gadolinium compounds: Gadovist, Magnevist and Dotarem. As these three compounds have different safety levels, investigating whether the signal levels were also different could aid clinical policy in choosing which compound to use.
+
+Samples were analyzed for each of six cell types. In this pilot study a single subject was analyzed three times at three different concentration levels. In contrast to previous drafts, here Concentration is treated as a continuous variable. Regressing the data against a linear model then becomes easy to interpret: at zero concentration we expect all intercepts to be zero, and we are principally interested in differences in the slopes of the linear fit of contrast agent to concentration. Another way to interpret this "slope" number is the amount of signal at unit concentration. This is a particularly handy interpreter as we have directly measured unit concentration in the data. 
+
+```{r load_cytof, echo=FALSE}
+source('masscyto_clean_gather_dataNEW.R')
+mass_cyto <- read.xls(xls="experimental_data.xlsx", 
+                      header=FALSE, skip=3, nrows=30)[,-(5:10)]
+mass_cyto_tall <- clean_gather_data(mass_cyto)
+#str(mass_cyto_tall)
+#head(mass_cyto_tall)
+#summary(mass_cyto_tall)
+```
+
+```{r extract_means, echo=FALSE}
+## extract means:
+means<-subset(mass_cyto_tall,MeasurementType=="Mean")
+```
+
+Our specific statistical question is whether there is an effect of contrast agent on the signal, independent of trial and cell type. It is clear that results will covary with cell type, but we expect the distribution around the "experiment" parameter to be iid.
+
+Contrary to a previous draft we do not center or scale the concentration values, as the value of 1 represents the industry standard dosage, making a unit change in the Concentration parameter easy to interpret. Concentration is further treated as a continuous variable with an intercept of 0.
+
+## Visualizing the means
+
+Here we plot means at concentration 1 for each contrast agent within each cell type. There seems good evidence of an effect where Dot < Mag and Mag < Gad. We use this sliding contrast coding.
+
+```{r}
+means_conc_1 <- subset(means, (Concentration == 1))
+means_conc_1$ContrastAgent <- factor(means_conc_1$ContrastAgent, c("Dotarem", "Magnevist", "Gadovist"))
+plt <- ggplot(means_conc_1) + 
+    geom_point(aes(x=ContrastAgent, y=log(value), color=CellType)) +
+    facet_wrap(~ CellType, ncol=3) +
+    ggtitle("Means By Contrast Agent @ Concentration 1") +
+    scale_x_discrete(labels = c("Dot", "Mag", "Gad"))
+print(plt)
+
+
+```
+
+
+
+## Normal Means Model
+
+We first model the data using only means, then apply a latent error model.
+
+```{r}
+## hand-coded sliding contrasts:
+means$GvsM<-ifelse(means$ContrastAgent=="Gadovist",1,
+           ifelse(means$ContrastAgent=="Magnevist",-1,0))
+means$MvsD<-ifelse(means$ContrastAgent=="Magnevist",1,
+           ifelse(means$ContrastAgent=="Dotarem",-1,0))
+```
+
+
+```{r cytof_model,  warning = FALSE, results="hide"}
+priors<-c(set_prior("cauchy(0,10)", class = "b"),
+          set_prior("normal(0,1)", class = "sd"), 
+          set_prior("normal(0,1)", class = "sigma"),
+          set_prior("lkj(2)", class = "cor"))
+
+cytof_brm<-brm(formula = value ~ 
+                   Concentration + 
+                   GvsM+MvsD+
+                   Concentration:GvsM + 
+                   Concentration:MvsD +
+                        (1+
+                        Concentration+
+                        GvsM+MvsD+
+                        Concentration:GvsM + 
+                        Concentration:MvsD | CellType),
+            data = subset(means,ContrastAgent!="control"), 
+            family = gaussian(),
+            prior = priors,
+            warmup = 1000, 
+            iter = 2000, 
+            chains = 4,
+            control = list(adapt_delta = 0.99,max_treedepth=15))
+```
+
+Summary of the results:
+
+```{r}
+#print(summary(cytof_brm))
+stanplot(cytof_brm, type="hist",pars=c("^b"))
+```
+
+As reported in previous drafts, correlations between the coefficients are spread across a very wide credible interval, and standard deviations within the group parameters reach down to zero.
+
+When Concentration is treated as a continuous variable and the data is regressed against a linear rather than a log-linear model, most of the population-level effects are relatively easy to interpret:
+
+- Intercept we expect to be zero because we expect all samples to show zero signal at zero concentration. However we have a significant but small positive intercept. I think this has to be interpreted as an indicator of some noise in the data.
+- Concentration indicates the mean value at concentration 1 across all cell types. This is not so hard to understand, but doesn't have a useful biological interpretation
+- GvsM and MvsD indicate constant offsets by contrast agent. Credible intervals cross through zero. This is the expected result.
+- The key contrasts of experimental interest are whether, across a concentration, slope Mag increase > slope Gad increase and diff(Dot) > diff(Mag) (same things). Here we see clear 95% confident effects. Specifically:
+
+```{r cytof_hdi, echo=FALSE}
+diff_mag_gad <- posterior_samples(cytof_brm, 'b_Concentration:GvsM', exact_match=T)
+diff_dot_mag <- posterior_samples(cytof_brm, 'b_Concentration:MvsD', exact_match=T)
+print('95% HDI, Mag > Gad :')
+print(hdi(diff_mag_gad))
+print('95% HDI, Dot > Mag :')
+print(hdi(diff_dot_mag))
+```
+
+We can conclude with over 95% confidence that in this study, Dotarem contained more signal per unit of contrast than Magnevist, and Magnevist contained more signal per unit of contrast than Gadovist. 
+
+## Log-log means model
+
+While the above model left coefficients easy to interpret, the distributions of the CyTOF data are better modelled by a lognormal distribution. However, the log means are then not linear in the concentration:
+```{r cytof_log}
+
+ggplot(subset(means, ContrastAgent != 'control')) + 
+    geom_line(aes(x=Concentration, y=log(value), group=CellType, color=CellType)) +
+    facet_wrap(~ Experiment + ContrastAgent, scales='free')
+
+```
+
+
+However, modelling log signal against log concentration appears to be roughly linear [to do -- Shravan, can we justfiy this better?):
+```{r cytof_log_log}
+
+ggplot(subset(means, ContrastAgent != 'control')) + 
+    geom_line(aes(x=log(Concentration), y=log(value), group=CellType, color=CellType)) +
+    facet_wrap(~ Experiment + ContrastAgent, scales='free')
+
+```
+
+We can thus run the same model on the log scale. Here we make a key change in the model. Instead of modelling the intercepts as zero and the change as occurring in the *slope* of the data, we model the slope as uniform and the change as occurring in the *intercept* of the data. Consequently we will interpret change in *intercept* as an effect. We also move to a more fully specified model:
+
+```{r cytof_brm_log}
+
+# FOR LOG MODELS
+
+priors<-c(set_prior("cauchy(0,10)", class = "b"),
+          set_prior("normal(0,1)", class = "sigma"))
+
+means_log = means
+means_log$value = log(means_log$value)
+means_log$Concentration = log(means_log$Concentration)
+
+cytof_brm_log<-brm(formula = value ~ 
+            Concentration + 
+            GvsM+
+            MvsD+
+            Concentration:GvsM + 
+            Concentration:MvsD +
+                (1 + 
+                Concentration + 
+                GvsM+
+                MvsD+
+                Concentration:GvsM + 
+                Concentration:MvsD 
+                | CellType),
+            data = subset(means_log,ContrastAgent!="control"), 
+            family = gaussian(),
+            prior = priors,
+            warmup = 1000, 
+            iter = 2000, 
+            chains = 4,
+            control = list(adapt_delta = 0.99,max_treedepth=15))
+
+stanplot(cytof_brm_log, type="hist",pars=c("^b"))
+```
+
+We then want to view the exponent of the posterior distributions, this time interested in the intercept:
+
+```{r cytof_hdi_log, echo=FALSE}
+mag_gad_log <- unlist(exp(posterior_samples(cytof_brm_log, 'b_GvsM', exact_match=T)))
+dot_mag_log <- unlist(exp(posterior_samples(cytof_brm_log, 'b_MvsD', exact_match=T)))
+print('95% HDI, log(Gad) > log(Mag) :')
+print(hdi(mag_gad_log))
+print('95% HDI, log(Mag) > log(Dot) :')
+print(hdi(dot_mag_log))
+
+```
+
+In the log case the relationship is multiplicative, so if 95% of the probability mass is greater than 1, there is a 95% confident effect that the contrast agent increases the signal.
+
+### Predictive modelling
+
+[While the goal of the analysis was to find the impact of the contrast agent independent of cell type and experiment, it leaves the result somewhat abstract. We can use the model to predict, for example, what impact a change of contrast agent will have on each cell types. For example we can ask the question, if we use Gadovist instead of Magnevist, what is the expected increase in signal for each unit of concentration, as estimated at concentration 1:
+
+[TO DO]
+
+## Latent error model
+
+While many applications of CyTOF simply use the central tendency statistic, CyTOF machines typically produce a range of summary statistics including quantiles. Exploiting these additional statistics should create a more robust model in a way that is clinically easy to apply and interpret, and therefore of benefit to the CyTOF community. 
+
+```{r}
+## extract lower quantiles:
+qlow<-subset(mass_cyto_tall,MeasurementType=="pct_05")
+## extract upper quantiles:
+qhigh<-subset(mass_cyto_tall,MeasurementType=="pct_95")
+
+mean_se = means
+mean_se$value <- log(mean_se$value)
+# test
+#mean_se$value <- (mean_se$value)
+mean_se$qlow <- log(qlow$value)
+# test
+#mean_se$qlow <- (qlow$value)
+mean_se$qdiff_lo <- mean_se$value - mean_se$qlow
+
+mean_se$qhigh <- log(qhigh$value)
+# test
+#mean_se$qhigh <- (qhigh$value)
+mean_se$qdiff_hi <- mean_se$qhigh - mean_se$value 
+
+mean_se$SE<-(mean_se$qdiff_hi) / 1.64
+mean_se$Concentration <- log(mean_se$Concentration)
+mean_se <- mean_se[c("ContrastAgent", "Concentration", "CellType", "GvsM", "MvsD", "qlow", "qdiff_lo", "value", "qdiff_hi", "qhigh", "SE")]
+```
+
+We can see that the current approach to the SE of the model -- subtracting log(hi) from log(mean) -- does not appear to be a good choice. The difference between log(lo) and log(mean), and between log(hi) and log(mean), are often very different:
+
+```{r}
+head(mean_se[,6:ncol(mean_se)])
+```
+
+Nonetheless, we can now run the same fully-specified brms log-log model including the standard error term:
+
+```{r cytof_brm_se}
+
+priors<-c(set_prior("cauchy(0,10)", class = "b"),
+          set_prior("cauchy(0,5)", class = "b",coef="Concentration"),
+          set_prior("normal(0,1)", class = "sd"), 
+          set_prior("lkj(2)", class = "cor"))
+
+cytof_brm_se <-brm(formula = value | se(SE) ~ 
+            Concentration + 
+            GvsM+
+            MvsD+
+            Concentration:GvsM + 
+            Concentration:MvsD +
+                (1 + 
+                Concentration + 
+                GvsM+
+                MvsD+
+                Concentration:GvsM + 
+                Concentration:MvsD 
+                | CellType),
+            data = subset(mean_se,ContrastAgent!="control"), 
+            family = gaussian(),
+            prior = priors,
+            warmup = 1000, 
+            iter = 2000, 
+            chains = 4,
+            control = list(adapt_delta = 0.99,max_treedepth=15))
+
+stanplot(cytof_brm_se, type="hist",pars=c("^b"))
+```
+
+Let's see if there is any difference in the confidence intervals:
+
+```{r cytof_hdi_se, echo=FALSE}
+mag_gad_se <- unlist(exp(posterior_samples(cytof_brm_se, 'b_GvsM', exact_match=T)))
+dot_mag_se <- unlist(exp(posterior_samples(cytof_brm_se, 'b_MvsD', exact_match=T)))
+print('95% HDI, log(Gad) > log(Mag) :')
+print(hdi(mag_gad_se))
+print('95% HDI, log(Mag) > log(Dot) :')
+print(hdi(dot_mag_se))
+
+```
+
+This approach as presently coded simply widens the variance of the estimated parameters. Central tendency is still similar (means of `r mean(mag_gad_log)` and `r mean(dot_mag_log)` for the log-log model without SE; and means of `r mean(mag_gad_se)` and `r mean(dot_mag_se)` for the log-log model with SE. Including the error creates less confidence in the estimate and takes us outside a 95% confidence interval for the effects. However, I do understand that small studies tend to be underpowered so if this is a superior model, this is what we should report.
+
+# RT-DC
+
+RT-DC is a method of measuring cellular elastic deformations developed by TU-Dresden. We use this technology to evaluate whether cells containing common contrast agents show differences in the Young's modulus, which would indicate that their physiological properties are being altered by the contrast agent. 
+
+```{r organize_data, echo=FALSE}
+load_data <- function(path) {
+    col_names <- c(
+        "Subject",
+        "Date",
+        "Unique_ID",
+        "Cell_Type",
+        "Contrast_Agent",
+        "Protocol",
+        "Parameter",
+        "Statistic",
+        "Value"
+    )
+    param_names <- c(rep("Area",4), rep("Deformation",4), rep("E",4))
+    stat_names <- rep(c("Mean", "SD", "5%", "95%"),3)
+    n_sheets = gdata::sheetCount(XL_PATH)
+    sheet_names <- gdata::sheetNames(XL_PATH)
+    rtdc = list(length=n_sheets-1)
+    for (s in 1:n_sheets) {
+        sheet = read.xls(XL_PATH, header=T, sheet = s, stringsAsFactors = F)
+        
+        # get Cell_Type and Contrast_Agent
+        sheetname_split <- unlist(strsplit(sheet_names[s], "_"))
+        cell_type <- rep(sheetname_split[2], nrow(sheet))
+        cont_ag <- rep(sheetname_split[1], nrow(sheet))
+        
+        # fix bad spelling
+        cell_type <- unname(sapply(cell_type, function(x) {ifelse(x == "Neuthrophils", "Neutrophils", x)}))
+
+        # get Date, Subject, Protocol (control or treatment)
+        date_subj_prot <- t(sapply(sheet[,1], function(x) {
+            split_list <- unlist(strsplit(x, "_"))
+            dates <- split_list[1]
+            subj <- split_list[2]
+            prot <- split_list[3]
+            date_subj_prot <- unname(cbind(dates,subj,prot))
+        }))
+        
+        # split subject from protocol
+        date_subj_prot <- date_subj_prot %>%
+            unname %>%
+            as.data.frame %>%
+            set_colnames(c("date", "subj", "prot"))
+        date <- date_subj_prot$date
+        subj <- as.character(date_subj_prot$subj)
+        prot <- as.character(clean_prots(date_subj_prot$prot))
+        
+        
+        # fix two representations for Angela
+        subj <- unname(sapply(subj, function(x) {ifelse(x == "AAS", "AngelaS", x)}))
+        
+        # split Date from colon
+        date <- sapply(date, function(x) {
+            split_date <- unlist(strsplit(as.character(x), ' '))
+            if (length(split_date) > 1) {
+                date = split_date[2]
+            }
+        })
+        # make unique ID
+        uniqueID <- unname(mapply(FUN=function(x,y,z,t){paste0(x,y,z,t)}, 
+                                  as.character(subj), as.character(date), as.character(cell_type), as.character(cont_ag)))
+        
+        # bind sheet of clean labels, make tall format
+        sheet_clean_labels <- cbind(subj, date, uniqueID, cell_type, cont_ag, prot)
+        n_vals <- ncol(sheet) - 1
+        labels_tall <- sheet_clean_labels[rep(1:nrow(sheet_clean_labels), each=n_vals),]
+
+        # convert values to tall format
+        values_tall <- apply(X = sheet[,2:ncol(sheet)], MARGIN = 1, FUN = function(rw) {
+            n_vals <- length(rw)
+            vals_tall <- rbind(param_names, stat_names, as.vector(rw))
+        })
+        # somehow this works
+        values_tall <- t(matrix(values_tall,3,length(values_tall)/3))
+        
+        # bind tall labels and tall values
+        data_tall <- cbind(labels_tall, values_tall)
+        data_tall[,-nrow(data_tall)] <- as.character(data_tall[,-nrow(data_tall)])
+        colnames(data_tall) <- col_names
+        rtdc[[s]] <- as.data.frame(data_tall, stringsAsFactors = FALSE)
+    }
+    rtdc <-do.call(rbind, rtdc)
+    cols_to_factor = colnames(rtdc)[-ncol(data_tall)]
+    rtdc[cols_to_factor] <- lapply(rtdc[cols_to_factor], function(x) {factor(unlist(x))})
+    rtdc$Value <- as.numeric(rtdc$Value)
+    rownames(rtdc) <- c()
+    return(rtdc)    
+}
+
+clean_prots <- function(prots_raw) {
+    control_entries <- c("Control", "control", "cntl", "Contrl", "ctl", "Ctrol", "cotrl", "Ctrl", "Ctr", "Cntrol", "cotnrol", 
+                         "control-", "Control2")
+    #gdcl3_entries <- c("GdCl3")
+    #gadovist_entries <- c("Gadovist", "Gadov")
+    #dotarem_entries <- c("Dotarem", "Dota")
+    #magnevist_entries <- c("Magnevist", "Magnevist_I", "Magnevist_II", "Magnevist_III")
+    prots <- sapply(as.character(prots_raw), function(x) {
+        x_split_1 <- unlist(strsplit(x, " "))
+        x_split_2 <- unlist(strsplit(x_split_1[1], "-"))
+        x <- x_split_2[1]
+        if (x %in% control_entries) {
+            x <- "Control"
+        } else {
+            x <- "Treatment"
+        }
+        #} else if (x %in% gadovist_entries) {
+        #    x <- "Gadovist"
+        #} else if (x %in% dotarem_entries) {
+        #    x <- "Dotarem"
+        #} else if (x %in% magnevist_entries) {
+        #    x <- "Magnevist"
+        #} else if (x %in% gdcl3_entries) {
+        #    x <- "GdCl3"
+        #} else {
+        #    print("ERROR: entry not labeled properly as control or contrast agent")
+        #}
+        return(x)
+    })
+    prots_2 <- prots %>%
+        as.factor %>%
+        unname
+    return(prots_2)
+}
+
+rtdc <- load_data(XL_PATH)
+```
+
+The RT-DC method is currently experimental, and control tests for an individual subject produce a wide range of values. Consequently each measurement with a contrast agent was paired with its own control from the same session. The Figure below shows pairwise control-treatment plots colored by subject:
+
+```{r pairwise_plots, echo=FALSE}
+
+rtdc_subset <- subset(rtdc, Parameter == "E" & Statistic == "Mean")
+rtdc_wide <- spread(data = rtdc_subset, key = Protocol, value=Value)
+
+plt <- ggplot(rtdc_wide) +
+        geom_point(aes(x=Control,y=Treatment,col=Subject)) +
+        geom_abline(slope=1) + 
+        scale_x_continuous(limits=c(0.7, 1.2)) +
+        scale_y_continuous(limits=c(0.7, 1.2)) +
+        facet_wrap(~ Contrast_Agent, ncol = 2) +
+        ggtitle("Mean Young's Modulus")
+print(plt)
+
+```
+
+```{r make_differences, echo=FALSE}
+make_differences_df <- function(rtdc) {
+    controls  <- subset(rtdc, Protocol=='Control')
+    treatments <- subset(rtdc, Protocol=='Treatment')
+    df_merge <- merge(controls, treatments, by=c('Unique_ID', 'Subject', 'Date', 
+                                                 'Cell_Type', 'Contrast_Agent', 
+                                                 'Parameter', 'Statistic'), 
+                      suffixes = c('_ctl', '_tmt')) %>% mutate(diff = Value_ctl - Value_tmt)
+    df_merge <- subset(df_merge, select = -c(Protocol_ctl, Protocol_tmt))
+    return(df_merge)
+}
+rtdc_diff <- make_differences_df(rtdc)
+diffdat<-subset(rtdc_diff,Parameter=="E" & Statistic=="Mean")
+# get mean residual from unit line
+control_variance <- var(diffdat$Value_ctl)
+unit_line_rss <- var(diffdat$diff)
+```
+
+While the range of control values is quite wide (`r control_variance`), the control-treatment pairs deviate an average of `r unit_line_rss` from the unit line, suggesting the control-treatment pairings are a stabler value set.
+
+```{r create_contrast_columns, echo=FALSE}
+
+
+## Do the contrast coding manually:
+diffdat$Gad_Mag<-ifelse(diffdat$Contrast_Agent=="Gadovist",-1,
+                        ifelse(diffdat$Contrast_Agent=="Magnevist",1,0))
+diffdat$Mag_Dot<-ifelse(diffdat$Contrast_Agent=="Magnevist",-1,
+                        ifelse(diffdat$Contrast_Agent=="Dotarem",1,0))
+diffdat$GdCl3_All<-ifelse(diffdat$Contrast_Agent=="GdCl3",-1,
+                          ifelse(diffdat$Contrast_Agent=="Gadovist",1/3,
+                                 ifelse(diffdat$Contrast_Agent=="Magnevist",1/3,
+                                        ifelse(diffdat$Contrast_Agent=="Dotarem",1/3,NA)
+                                 )
+                          ))
+diffdat$Gad_Mag<-ifelse(diffdat$Contrast_Agent=="Gadovist",1,
+                        ifelse(diffdat$Contrast_Agent=="Magnevist",-1,0))
+diffdat$Mag_Dot<-ifelse(diffdat$Contrast_Agent=="Magnevist",1,
+                        ifelse(diffdat$Contrast_Agent=="Dotarem",-1,0))
+diffdat$GdCl3_All<-ifelse(diffdat$Contrast_Agent=="GdCl3",1,
+                          ifelse(diffdat$Contrast_Agent=="Gadovist",-1/3,
+                                 ifelse(diffdat$Contrast_Agent=="Magnevist",-1/3,
+                                        ifelse(diffdat$Contrast_Agent=="Dotarem",-1/3,NA)
+                                 )
+                          ))
+diffMono<-subset(diffdat,Cell_Type=="Monocytes")
+diffNeutro<-subset(diffdat,Cell_Type=="Neutrophils")
+```
+
+## Monocytes
+
+```{r brms_monocytes,  warning = FALSE, results="hide"}
+priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
+            set_prior("cauchy(0, 10)", class = "b"),
+            set_prior("cauchy(0, 10)", class = "sd"),
+            set_prior("cauchy(0, 10)", class = "sigma")
+            )
+
+
+mdiffMonoContrAgt_E <- brm(formula = diff ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
+                (1| Subject),
+              data = diffMono, family = gaussian(), prior = priors_cauchy_diff2,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+stanplot(mdiffMonoContrAgt_E, type="hist",pars=c("^b"))
+
+
+mMonoContrAgtdiffEpost<-posterior_samples(mdiffMonoContrAgt_E, "^b")
+```
+
+For Monocytes, there is weak evidence that GdCl3 causes a decrease in Young's Modulus against the other three contrast agents. The comparison of the individual contrast agents is not determinate at this time:
+
+
+```{r mono_stats, echo=FALSE}
+print("Prob Gad > Mag")
+mean(mMonoContrAgtdiffEpost$b_Gad_Mag>0)
+print("Prob Mag > Dot")
+mean(mMonoContrAgtdiffEpost$b_Mag_Dot>0)
+print("Prob GdCl3 > All")
+mean(mMonoContrAgtdiffEpost$b_GdCl3_All>0)
+```
+
+## Neutrophils
+
+```{r brms_neutrophils, warning = FALSE, results="hide"}
+mdiffNeutroContrAgt_E <- brm(formula = diff ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
+                (1| Subject),
+              data = diffNeutro, family = gaussian(), prior = priors_cauchy_diff2,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+stanplot(mdiffNeutroContrAgt_E, type="hist",pars=c("^b"))
+
+mNeutroContrAgtdiffEpost<-posterior_samples(mdiffNeutroContrAgt_E, "^b")
+```
+
+For Neutrophils, there isn't much evidence for differences by Contrast Agent, though there is again maybe some weak evidence (80% likelihood) that Magnevist has higher Young's modulus than Dotarem:
+
+```{r neutro_stats, echo=FALSE}
+print("Prob Gad > Mag")
+mean(mNeutroContrAgtdiffEpost$b_Gad_Mag>0)
+print("Prob Mag > Dot")
+mean(mNeutroContrAgtdiffEpost$b_Mag_Dot>0)
+print("Prob GdCl3 > All")
+mean(mNeutroContrAgtdiffEpost$b_GdCl3_All>0)
+```
+
+# Latent Error Model
+
+TODO: Use hacker stats to create distributions off the mean and quantiles, then subtract the two distributions to get a distribution of the differences??

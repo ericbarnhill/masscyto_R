@@ -3,3 +3,4 @@ Rcpp
 ggplot2
 brms
 MASS
+lattice
