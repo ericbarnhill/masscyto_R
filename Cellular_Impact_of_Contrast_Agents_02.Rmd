@@ -151,11 +151,11 @@ print(hdi(dot_mag_log))
 
 SV: If our model is
 
-$log(value) = beta_1 + beta_2 GvsM \dots$
+$log(value) = \beta_1 + \beta_2 GvsM \dots$
 
 Shouldn't the transformation be
 
-$exp(beta_1 + beta_2)$ and not just $exp(beta_2)$?
+$exp(\beta_1 + \beta_2)$ and not just $exp(\beta_2)$?
 
 ```{r}
 mag_gad_log <-unlist(exp(posterior_samples(cytof_brm_log,'b_Intercept',exact_match=TRUE)+
