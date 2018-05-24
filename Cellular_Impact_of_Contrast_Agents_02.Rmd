@@ -82,7 +82,7 @@ ggplot(subset(means, ContrastAgent != 'control')) +
 
 Modelling log signal against log concentration appears to be roughly linear.
 
-[SV:] Log-transformation often makes sense for variables that can only have  positive values. So using a log-transform for both value and concentration is reasonable here.
+[SV:] Log-transformation often makes sense for variables that can only have  positive values. So using a log-transform for both value and concentration is reasonable here. The reason we want to stay with linear models is just to keep the model relatively simple; non-linear models can also be fit, but they add a lot more complexity and parameters.
 
 ```{r cytof_log_log}
 
