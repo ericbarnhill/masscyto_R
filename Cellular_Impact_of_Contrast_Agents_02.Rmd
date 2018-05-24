@@ -186,6 +186,11 @@ While the goal of the analysis was to find the impact of the contrast agent inde
 
 While many applications of CyTOF simply use the central tendency statistic, CyTOF machines typically produce a range of summary statistics including quantiles. Exploiting these additional statistics should create a more robust model in a way that is clinically easy to apply and interpret, and therefore of benefit to the CyTOF community. 
 
+SV: It's true that the distribution is skewed, and one side is wider. What I did below was used the wider interval; this leads to a more conservative measurement error model. Now, we could fit a Gamma(a,b) as follows:
+
+- get mean and variance of each measurement (is this possible to obtain?)
+- then solve for the parameters a,b: mean=$a/b$, variance $a/b^2$
+
 ```{r}
 ## extract lower quantiles:
 qlow<-subset(mass_cyto_tall,MeasurementType=="pct_05")
@@ -206,7 +211,9 @@ mean_se$qhigh <- log(qhigh$value)
 #mean_se$qhigh <- (qhigh$value)
 mean_se$qdiff_hi <- mean_se$qhigh - mean_se$value 
 
-mean_se$SE<-(mean_se$qdiff_hi) / 1.64
+#mean_se$SE<-(mean_se$qdiff_hi) / 1.64
+##SV: using the wider range:
+mean_se$SE<-(mean_se$qdiff_lo) / 1.64
 mean_se$Concentration <- log(mean_se$Concentration)
 mean_se <- mean_se[c("ContrastAgent", "Concentration", "CellType", "GvsM", "MvsD", "qlow", "qdiff_lo", "value", "qdiff_hi", "qhigh", "SE")]
 ```
@@ -251,6 +258,8 @@ stanplot(cytof_brm_se, type="hist",pars=c("^b"))
 ```
 
 Let's see if there is any difference in the confidence intervals:
+
+SV: we should not call them confidence intervals, but rather credible intervals. The former are frequentist, 
 
 ```{r cytof_hdi_se, echo=FALSE}
 mag_gad_se <- unlist(exp(posterior_samples(cytof_brm_se, 'b_GvsM', exact_match=T)))
