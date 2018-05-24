@@ -189,7 +189,8 @@ While many applications of CyTOF simply use the central tendency statistic, CyTO
 SV: It's true that the distribution is skewed, and one side is wider. What I did below was used the wider interval; this leads to a more conservative measurement error model. Now, we could fit a Gamma(a,b) as follows:
 
 - get mean and variance of each measurement (is this possible to obtain?)
-- then solve for the parameters a,b: mean=$a/b$, variance $a/b^2$
+- then solve for the parameters a,b: mean=$a/b$, variance $a/b^2$. For each row in the data frame, we assume now that the data are generated from a Gamma(a,b), with a unique a and b parameter for 
+- 
 
 ```{r}
 ## extract lower quantiles:
