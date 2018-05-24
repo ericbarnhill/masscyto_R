@@ -7,10 +7,12 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
-XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb_2.xls")
+#PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
+PROJ_DIR ="./"
+#XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb_2.xls")
+XL_PATH <- file.path("rt-dc_eb_2.xls")
 knitr::opts_chunk$set(root.dir = PROJ_DIR)
-setwd(PROJ_DIR)
+#setwd(PROJ_DIR)
 packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", 'HDInterval')
 lapply(packages, require, character.only = T)
 theme_set(theme_default())
@@ -78,16 +80,23 @@ ggplot(subset(means, ContrastAgent != 'control')) +
 ```
 
 
-Modelling log signal against log concentration appears to be roughly linear [to do -- Shravan, can we justfiy this better?):
+Modelling log signal against log concentration appears to be roughly linear.
+
+[SV:] Log-transformation often makes sense for variables that can only have  positive values. So using a log-transform for both value and concentration is reasonable here.
+
 ```{r cytof_log_log}
 
 ggplot(subset(means, ContrastAgent != 'control')) + 
     geom_line(aes(x=log(Concentration), y=log(value), group=CellType, color=CellType)) +
     facet_wrap(~ Experiment + ContrastAgent, scales='free')
-
 ```
 
 In contrast to the previous normal model, which evaluated slopes, here we model the slope as uniform and the change as occurring in the *intercept* of the data. Consequently we will interpret change in *intercept* as an effect. The model is as follows:
+
+SV: I don't understand what you mean about the intercept above. In the model below, it's still the slopes for GvsM and MvsD (and their interaction with concentration) that we are interpreting, isn't it?  Oh, I just understood what you are saying here. It's actually the slopes that we are interpreting here; maybe what is confusing about brms is that all *coefficients* (called b in the priors) have a Cauchy(0,10) prior. So, we should rather say:
+
+We are again interpreting the slopes: the effect of GvsM and MvsD. A positive value for the respective parameter means that G > M and M > D. 
+
 
 ```{r cytof_brm_log}
 
@@ -140,7 +149,32 @@ print(hdi(dot_mag_log))
 
 ```
 
+SV: If our model is
+
+$log(value) = beta_1 + beta_2 GvsM \dots$
+
+Shouldn't the transformation be
+
+$exp(beta_1 + beta_2)$ and not just $exp(beta_2)$?
+
+```{r}
+mag_gad_log <-unlist(exp(posterior_samples(cytof_brm_log,'b_Intercept',exact_match=TRUE)+
+                           posterior_samples(cytof_brm_log, 'b_GvsM',exact_match=TRUE)))
+print('95% credible interval, log(Gad) > log(Mag) :')
+print(hdi(mag_gad_log))
+
+```
+
+SV:
+Similarly for the other case. Also, you wrote Highest (posterior) Density Interval, but this is a credible interval. The two are the same if the distribution is symmetric, but if not then they differ. The credible interval is an equal-tailed interval; the HDI not necessarily.
+
 In the log case the relationship is multiplicative, so if 95% of the probability mass is greater than 1, there is a 95% confident effect that the contrast agent increases the signal.
+
+SV: Is this what you mean (see code immediately below)? How can probability mass be greater than 1? I didn't understand that statement. I would just say: we can compute the posterior probability that the parameter has a positive sign. If it is positive, it means that the contrast agent G increases the signal *more* than M (the sliding contrasts do pairwise comparisons).
+
+```{r}
+mean(unlist(posterior_samples(cytof_brm_log, 'b_GvsM',exact_match=TRUE))>0)
+```
 
 ### Predictive modelling
 
