@@ -450,7 +450,7 @@ diffdat <- merge(diffdat_mean, diffdat_sd, by=merge_cols, suffixes = c("_mean", 
 While the range of control values is quite wide (`r control_variance`), the control-treatment pairs deviate an average of `r unit_line_rss` from the unit line, suggesting the control-treatment pairings are a stabler value set.
 
 ```{r create_contrast_columns, echo=FALSE}
-
+diffdat$diff_sd<-sqrt(diffdat$Value_ctl_sd^2+diffdat$Value_tmt_sd^2)
 
 ## Do the contrast coding manually:
 diffdat$Gad_Mag<-ifelse(diffdat$Contrast_Agent=="Gadovist",-1,
@@ -474,10 +474,12 @@ diffdat$GdCl3_All<-ifelse(diffdat$Contrast_Agent=="GdCl3",1,
                                  )
                           ))
 diffMono<-subset(diffdat,Cell_Type=="Monocytes")
+head(diffMono)
 diffNeutro<-subset(diffdat,Cell_Type=="Neutrophils")
 ```
 
 ## Monocytes
+
 
 ```{r brms_monocytes,  warning = FALSE, results="hide"}
 priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
@@ -487,15 +489,30 @@ priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
             )
 
 
-mdiffMonoContrAgt_E <- brm(formula = diff ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
+mdiffMonoContrAgt_E <- brm(formula = diff_mean  ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
                 (1| Subject),
               data = diffMono, family = gaussian(), prior = priors_cauchy_diff2,
               iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
 
 stanplot(mdiffMonoContrAgt_E, type="hist",pars=c("^b"))
 
+priors_cauchy_diff2ME <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
+            set_prior("cauchy(0, 10)", class = "b"),
+            set_prior("cauchy(0, 10)", class = "sd")
+            )
+
+mdiffMonoContrAgt_E_ME <- brm(formula = diff_mean | se(diff_sd)  ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
+                (1| Subject),
+              data = diffMono, family = gaussian(), prior = priors_cauchy_diff2ME,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+
+stanplot(mdiffMonoContrAgt_E_ME, type="hist",pars=c("^b"))
+
 
 mMonoContrAgtdiffEpost<-posterior_samples(mdiffMonoContrAgt_E, "^b")
+
+mMonoContrAgtdiffEpostME<-posterior_samples(mdiffMonoContrAgt_E_ME, "^b")
+
 ```
 
 For Monocytes, there is weak evidence that GdCl3 causes a decrease in Young's Modulus against the other three contrast agents. The comparison of the individual contrast agents is not determinate at this time:
@@ -508,6 +525,17 @@ print("Prob Mag > Dot")
 mean(mMonoContrAgtdiffEpost$b_Mag_Dot>0)
 print("Prob GdCl3 > All")
 mean(mMonoContrAgtdiffEpost$b_GdCl3_All>0)
+```
+
+Measurement error:
+
+```{r}
+print("Prob Gad > Mag")
+mean(mMonoContrAgtdiffEpostME$b_Gad_Mag>0)
+print("Prob Mag > Dot")
+mean(mMonoContrAgtdiffEpostME$b_Mag_Dot>0)
+print("Prob GdCl3 > All")
+mean(mMonoContrAgtdiffEpostME$b_GdCl3_All>0)
 ```
 
 ## Neutrophils
