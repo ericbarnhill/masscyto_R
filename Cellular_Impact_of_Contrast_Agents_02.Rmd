@@ -428,21 +428,23 @@ print(plt)
 ```
 
 ```{r make_differences, echo=FALSE}
+merge_cols = c('Unique_ID', 'Subject', 'Date', 'Cell_Type', 'Contrast_Agent', 
+                                                 'Parameter', 'Statistic')
 make_differences_df <- function(rtdc) {
     controls  <- subset(rtdc, Protocol=='Control')
     treatments <- subset(rtdc, Protocol=='Treatment')
-    df_merge <- merge(controls, treatments, by=c('Unique_ID', 'Subject', 'Date', 
-                                                 'Cell_Type', 'Contrast_Agent', 
-                                                 'Parameter', 'Statistic'), 
+    df_merge <- merge(controls, treatments, by=merge_cols, 
                       suffixes = c('_ctl', '_tmt')) %>% mutate(diff = Value_ctl - Value_tmt)
     df_merge <- subset(df_merge, select = -c(Protocol_ctl, Protocol_tmt))
     return(df_merge)
 }
 rtdc_diff <- make_differences_df(rtdc)
-diffdat<-subset(rtdc_diff,Parameter=="E" & Statistic=="Mean")
-# get mean residual from unit line
-control_variance <- var(diffdat$Value_ctl)
-unit_line_rss <- var(diffdat$diff)
+diffdat_mean<-subset(rtdc_diff,Parameter=="E" & Statistic == "Mean")
+diffdat_sd<-subset(rtdc_diff,Parameter=="E" & Statistic == "SD")
+merge_cols = c('Unique_ID', 'Subject', 'Date', 'Cell_Type', 'Contrast_Agent', 
+                                                 'Parameter')
+diffdat <- merge(diffdat_mean, diffdat_sd, by=merge_cols, suffixes = c("_mean", "_sd")) %>%
+    select(-starts_with("Statistic"))
 ```
 
 While the range of control values is quite wide (`r control_variance`), the control-treatment pairs deviate an average of `r unit_line_rss` from the unit line, suggesting the control-treatment pairings are a stabler value set.
