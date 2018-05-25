@@ -410,6 +410,10 @@ The RT-DC method is currently experimental, and control tests for an individual 
 ```{r pairwise_plots, echo=FALSE}
 
 rtdc_subset <- subset(rtdc, Parameter == "E" & Statistic == "Mean")
+summary(rtdc_subset)
+rtdc_subsetSD <- subset(rtdc, Parameter == "E" & Statistic == "SD")
+summary(rtdc_subsetSD)
+
 rtdc_wide <- spread(data = rtdc_subset, key = Protocol, value=Value)
 
 plt <- ggplot(rtdc_wide) +
