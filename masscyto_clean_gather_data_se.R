@@ -7,7 +7,7 @@ library(rlist)
 
 # set some globals
 #MASSCYTO_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R/"
-mass_cyto_xls_path <- file.path("experimental_data.xlsx")
+#mass_cyto_xls_path <- file.path("experimental_data.xlsx")
 
 set_columns <- function(df, main_columns, stat_types, cell_types, marker_types) {
     #
@@ -35,14 +35,10 @@ process_events <- function(mass_cyto) {
 }
 
 
-clean_gather_data_se <- function(mass_cyto) {
+clean_gather_data_se <- function(mass_cyto, main_columns, stat_types, cell_types, marker_types) {
     # kludge for current data
-    mass_cyto <- separate(mass_cyto, V1, c("Subject", "Date"), sep="_", remove=T)
+    #mass_cyto <- separate(mass_cyto, V1, c("Subject", "Date"), sep="_", remove=T)
     #
-    main_columns <- c("Subject", "Date", "Experiment", "Contrast_Agent", "Concentration", "Counts")
-    stat_types <- c("Events", "Mean", "Median", "CV", "Q05", "Q95")
-    cell_types <- c("Neutrophils","T cells","Monocytes","B cells","NK cells_1","NK cells_2")
-    marker_types <- c("GdCl3")
     colnames(mass_cyto) <- set_columns(mass_cyto, main_columns, stat_types, cell_types, marker_types)
     mass_cyto <- process_events(mass_cyto)
     mass_cyto_tall <- gather(mass_cyto, Measurement, Value, -Subject, -Date, -Experiment, -Contrast_Agent, -Concentration, -Counts) %>%
@@ -60,9 +56,11 @@ clean_gather_data_se <- function(mass_cyto) {
     return(data_list)
 }
 
-load_clean_data <- function() {
-    MASSCYTO_DIR = "/home/ericbarnhill/Documents/code/R/2017-12-15-masscyto/"
-    mass_cyto_xls_path <- file.path(MASSCYTO_DIR, "angela.xlsx")
-    mass_cyto <- read.xls(xls=mass_cyto_xls_path, header=FALSE, skip=3, nrows=30)[,-(5:10)]
-    mass_cyto_tall <- clean_gather_data(mass_cyto)
+load_clean_data <- function(path) {
+    mass_cyto <- read.xls(xls=path)
+    main_columns <- c("Subject", "Date", "Experiment", "Contrast_Agent", "Concentration", "Counts")
+    stat_types <- c("Events", "Mean", "Q05", "Q95")
+    cell_types <- c("Neutrophils","T cells","Monocytes","B cells","NK cells_1","NK cells_2")
+    marker_types <- c("GdCl3")
+    data_list <- clean_gather_data_se(mass_cyto, main_columns, stat_types, cell_types, marker_types)
 }
