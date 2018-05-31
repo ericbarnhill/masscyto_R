@@ -1,23 +1,21 @@
-```{r organize_data, echo=FALSE}
 load_data <- function(path) {
     col_names <- c(
         "Subject",
         "Date",
-        "Unique_ID",
         "Cell_Type",
         "Contrast_Agent",
         "Protocol",
-        "Parameter",
-        "Statistic",
-        "Value"
+        "Events",
+        "E_Mean",
+        "E_SD", 
+        "E_q05",
+        "E_q95"
     )
-    param_names <- c(rep("Area",4), rep("Deformation",4), rep("E",4))
-    stat_names <- rep(c("Mean", "SD", "5%", "95%"),3)
-    n_sheets = gdata::sheetCount(XL_PATH)
-    sheet_names <- gdata::sheetNames(XL_PATH)
+    n_sheets = gdata::sheetCount(path)
+    sheet_names <- gdata::sheetNames(path)
     rtdc = list(length=n_sheets-1)
     for (s in 1:n_sheets) {
-        sheet = read.xls(XL_PATH, header=T, sheet = s, stringsAsFactors = F)
+        sheet = read.xls(path, header=T, sheet = s, stringsAsFactors = F)
         
         # get Cell_Type and Contrast_Agent
         sheetname_split <- unlist(strsplit(sheet_names[s], "_"))
@@ -44,7 +42,7 @@ load_data <- function(path) {
         date <- date_subj_prot$date
         subj <- as.character(date_subj_prot$subj)
         prot <- as.character(clean_prots(date_subj_prot$prot))
-        
+        events <- as.numeric(sheet$Events)
         
         # fix two representations for Angela
         subj <- unname(sapply(subj, function(x) {ifelse(x == "AAS", "AngelaS", x)}))
@@ -56,33 +54,26 @@ load_data <- function(path) {
                 date = split_date[2]
             }
         })
-        # make unique ID
-        uniqueID <- unname(mapply(FUN=function(x,y,z,t){paste0(x,y,z,t)}, 
-                                  as.character(subj), as.character(date), as.character(cell_type), as.character(cont_ag)))
         
-        # bind sheet of clean labels, make tall format
-        sheet_clean_labels <- cbind(subj, date, uniqueID, cell_type, cont_ag, prot)
-        n_vals <- ncol(sheet) - 1
-        labels_tall <- sheet_clean_labels[rep(1:nrow(sheet_clean_labels), each=n_vals),]
+        #combine labels with Young's modulus data
+        sheet_clean_labels <- data.frame(subj, date, cell_type, cont_ag, prot, events)
+        youngs_cols <- unname(sapply(colnames(sheet), function(x) {grepl("Young", x)}))
+        youngs_data <- sheet[,youngs_cols]
+        rtdc_data <- cbind(sheet_clean_labels, youngs_data)
+        colnames(rtdc_data) <- col_names
         
-        # convert values to tall format
-        values_tall <- apply(X = sheet[,2:ncol(sheet)], MARGIN = 1, FUN = function(rw) {
-            n_vals <- length(rw)
-            vals_tall <- rbind(param_names, stat_names, as.vector(rw))
-        })
-        # somehow this works
-        values_tall <- t(matrix(values_tall,3,length(values_tall)/3))
+        #calculate conservativce SE
+        rtdc_data <- mutate(rtdc_data, E_SD_hi_log = log(E_q95) - log(E_Mean)) %>%
+            mutate(., E_SD_low_log = log(E_Mean) - log(E_q05)) %>%
+            mutate(., E_SE_conserv_log = E_SD_hi_log / sqrt(Events)) %>%
+            mutate(., E_Mean_log = log(E_Mean))
+            
         
-        # bind tall labels and tall values
-        data_tall <- cbind(labels_tall, values_tall)
-        data_tall[,-nrow(data_tall)] <- as.character(data_tall[,-nrow(data_tall)])
-        colnames(data_tall) <- col_names
-        rtdc[[s]] <- as.data.frame(data_tall, stringsAsFactors = FALSE)
+        rtdc[[s]] = rtdc_data
     }
     rtdc <-do.call(rbind, rtdc)
-    cols_to_factor = colnames(rtdc)[-ncol(data_tall)]
+    cols_to_factor = colnames(rtdc)[1:5]
     rtdc[cols_to_factor] <- lapply(rtdc[cols_to_factor], function(x) {factor(unlist(x))})
-    rtdc$Value <- as.numeric(rtdc$Value)
     rownames(rtdc) <- c()
     return(rtdc)    
 }
@@ -122,7 +113,3 @@ clean_prots <- function(prots_raw) {
     return(prots_2)
 }
 
-rtdc <- load_data(XL_PATH)
-
-rtdc_subset <- subset(rtdc, Parameter == "E" & Statistic == "Mean")
-rtdc_wide <- spread(data = rtdc_subset, key = Protocol, value=Value)
