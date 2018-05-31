@@ -10,7 +10,7 @@ knitr::opts_chunk$set(echo = TRUE)
 PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
 #PROJ_DIR ="./"
 CYTOF_PATH <- file.path(PROJ_DIR, "cytof_data_2018_05_30.xlsx")
-RTDC_PATH <- file.path(PROJ_DIR, "rtdc_with_events.xls")
+XL_PATH <- file.path(PROJ_DIR, "rt-dc_eb_2.xls")
 knitr::opts_chunk$set(root.dir = PROJ_DIR)
 setwd(PROJ_DIR)
 packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", 'HDInterval')
@@ -36,15 +36,10 @@ Samples were analyzed for each of six cell types. In this pilot study a single s
 source('masscyto_clean_gather_data_se.R')
 mass_cyto <- read.xls(xls=CYTOF_PATH, 
                       header=FALSE, skip=3)
-mass_cyto_tall <- clean_gather_data_se(mass_cyto)
-#str(mass_cyto_tall)
-#head(mass_cyto_tall)
-#summary(mass_cyto_tall)
-```
-
-```{r extract_means, echo=FALSE}
-## extract means:
-means<-subset(mass_cyto_tall,MeasurementType=="Mean")
+data_list <- clean_gather_data_se(mass_cyto)
+masscyto_data_tall <- data_list[[1]]
+masscyto_data_wide <- data_list[[2]]
+print(summary(masscyto_data_wide))
 ```
 
 Our specific statistical question is whether there is an effect of contrast agent on the signal, independent of trial and cell type. It is clear that results will covary with cell type, but we expect the distribution around the "experiment" parameter to be iid.
@@ -54,11 +49,12 @@ Our specific statistical question is whether there is an effect of contrast agen
 Here we plot means at concentration 1 for each contrast agent within each cell type. There seems good evidence of an effect where Dot < Mag and Mag < Gad. We use this sliding contrast coding.
 
 ```{r}
+means <- subset(masscyto_data_tall, (Stat_Type == "Mean") & Contrast_Agent != "control")
 means_conc_1 <- subset(means, (Concentration == 1))
-means_conc_1$ContrastAgent <- factor(means_conc_1$ContrastAgent, c("Dotarem", "Magnevist", "Gadovist"))
+means_conc_1$Contrast_Agent <- factor(means_conc_1$Contrast_Agent, c("Dotarem", "Magnevist", "Gadovist"))
 plt <- ggplot(means_conc_1) + 
-    geom_point(aes(x=ContrastAgent, y=log(value), color=CellType)) +
-    facet_wrap(~ CellType, ncol=3) +
+    geom_point(aes(x=Contrast_Agent, y=log(Value), color=Cell_Type)) +
+    facet_wrap(~ Cell_Type, ncol=3) +
     ggtitle("Means By Contrast Agent @ Concentration 1") +
     scale_x_discrete(labels = c("Dot", "Mag", "Gad"))
 print(plt)
@@ -68,27 +64,15 @@ print(plt)
 
 
 
-## Log-log means model
+## Log-log means plot
 
-The distributions of the CyTOF data are well modelled by a lognormal distribution. However, the log means are then not linear in the concentration:
-```{r cytof_log}
-
-ggplot(subset(means, ContrastAgent != 'control')) + 
-    geom_line(aes(x=Concentration, y=log(value), group=CellType, color=CellType)) +
-    facet_wrap(~ Experiment + ContrastAgent, scales='free')
-
-```
-
-
-Modelling log signal against log concentration appears to be roughly linear.
-
-[SV:] Log-transformation often makes sense for variables that can only have  positive values. So using a log-transform for both value and concentration is reasonable here. The reason we want to stay with linear models is just to keep the model relatively simple; non-linear models can also be fit, but they add a lot more complexity and parameters.
+The log-lot plot looks reasonably linear:
 
 ```{r cytof_log_log}
 
-ggplot(subset(means, ContrastAgent != 'control')) + 
-    geom_line(aes(x=log(Concentration), y=log(value), group=CellType, color=CellType)) +
-    facet_wrap(~ Experiment + ContrastAgent, scales='free')
+ggplot(subset(means, Contrast_Agent != 'control')) + 
+    geom_line(aes(x=log(Concentration), y=log(Value), group=Cell_Type, color=Cell_Type)) +
+    facet_wrap(~ Experiment + Contrast_Agent, scales='free')
 ```
 
 In contrast to the previous normal model, which evaluated slopes, here we model the slope as uniform and the change as occurring in the *intercept* of the data. Consequently we will interpret change in *intercept* as an effect. The model is as follows:
@@ -101,32 +85,32 @@ We are again interpreting the slopes: the effect of GvsM and MvsD. A positive va
 ```{r cytof_brm_log}
 
 ## hand-coded sliding contrasts:
-means$GvsM<-ifelse(means$ContrastAgent=="Gadovist",1,
-           ifelse(means$ContrastAgent=="Magnevist",-1,0))
-means$MvsD<-ifelse(means$ContrastAgent=="Magnevist",1,
-           ifelse(means$ContrastAgent=="Dotarem",-1,0))
+masscyto_data_wide$GvsM<-ifelse(masscyto_data_wide$Contrast_Agent=="Gadovist",1,
+           ifelse(masscyto_data_wide$Contrast_Agent=="Magnevist",-1,0))
+masscyto_data_wide$MvsD<-ifelse(masscyto_data_wide$Contrast_Agent=="Magnevist",1,
+           ifelse(masscyto_data_wide$Contrast_Agent=="Dotarem",-1,0))
 
 priors<-c(set_prior("cauchy(0,10)", class = "b"),
-          set_prior("normal(0,1)", class = "sigma"))
+          set_prior("normal(0,1)", class = "sd"), 
+          set_prior("lkj(2)", class = "cor"))
 
-means_log = means
-means_log$value = log(means_log$value)
-means_log$Concentration = log(means_log$Concentration)
+brm_df <- subset(masscyto_data_wide[c("logMean", "SE", "logConcentration", "GvsM", "MvsD", "Cell_Type", "Contrast_Agent")], Contrast_Agent!="control")
+brm_df$Contrast_Agent <- factor(brm_df$Contrast_Agent, labels = c("Gadovist", "Magnevist", "Dotarem"))
 
-cytof_brm_log<-brm(formula = value ~ 
-            Concentration + 
+cytof_brm_log<-brm(formula = logMean | se(SE) ~ 
+            logConcentration + 
             GvsM+
             MvsD+
-            Concentration:GvsM + 
-            Concentration:MvsD +
+            logConcentration:GvsM + 
+            logConcentration:MvsD +
                 (1 + 
-                Concentration + 
+                logConcentration + 
                 GvsM+
                 MvsD+
-                Concentration:GvsM + 
-                Concentration:MvsD 
-                | CellType),
-            data = subset(means_log,ContrastAgent!="control"), 
+                logConcentration:GvsM + 
+                logConcentration:MvsD 
+                | Cell_Type),
+            data = brm_df, 
             family = gaussian(),
             prior = priors,
             warmup = 1000, 
@@ -179,104 +163,6 @@ mean(unlist(posterior_samples(cytof_brm_log, 'b_GvsM',exact_match=TRUE))>0)
 ### Predictive modelling
 
 While the goal of the analysis was to find the impact of the contrast agent independent of cell type and experiment, it leaves the result somewhat abstract. We can use the model to predict, for example, what impact a change of contrast agent will have on each cell types. For example we can ask the question, if we use Gadovist instead of Magnevist, what is the expected increase in signal for each unit of concentration, as estimated at concentration 1:
-
-[TO DO]
-
-## Latent error model
-
-While many applications of CyTOF simply use the central tendency statistic, CyTOF machines typically produce a range of summary statistics including quantiles. Exploiting these additional statistics should create a more robust model in a way that is clinically easy to apply and interpret, and therefore of benefit to the CyTOF community. 
-
-SV: It's true that the distribution is skewed, and one side is wider. What I did below was used the wider interval; this leads to a more conservative measurement error model. Now, we could fit a Gamma(a,b) as follows:
-
-- get mean and variance of each measurement (is this possible to obtain?)
-- then solve for the parameters a,b: mean=$a/b$, variance $a/b^2$. For each row in the data frame, we assume now that the data are generated from a Gamma(a,b), with a unique a and b parameter for 
-- 
-
-```{r}
-## extract lower quantiles:
-qlow<-subset(mass_cyto_tall,Stat_Type=="05")
-## extract upper quantiles:
-qhigh<-subset(mass_cyto_tall,MeasurementType=="95")
-
-mean_se = means
-mean_se$value <- log(mean_se$value)
-# test
-#mean_se$value <- (mean_se$value)
-mean_se$qlow <- log(qlow$value)
-# test
-#mean_se$qlow <- (qlow$value)
-mean_se$qdiff_lo <- mean_se$value - mean_se$qlow
-
-mean_se$qhigh <- log(qhigh$value)
-# test
-#mean_se$qhigh <- (qhigh$value)
-mean_se$qdiff_hi <- mean_se$qhigh - mean_se$value 
-
-mean_se$SD<-(mean_se$qdiff_hi) / 1.64
-
-# get N for standard error
-events <- subset(mass_cyto_tall, Stat_Type == "Events")
-mean_se$SE<- mean_se$SD / mean_se$Events
-##SV: using the wider range:
-#mean_se$SE<-(mean_se$qdiff_lo) / 1.64
-mean_se$Concentration <- log(mean_se$Concentration)
-mean_se <- mean_se[c("ContrastAgent", "Concentration", "CellType", "GvsM", "MvsD", "qlow", "qdiff_lo", "value", "qdiff_hi", "qhigh", "SE")]
-```
-
-We can see that the current approach to the SE of the model -- subtracting log(hi) from log(mean) -- does not appear to be a good choice. The difference between log(lo) and log(mean), and between log(hi) and log(mean), are often very different:
-
-```{r}
-head(mean_se[,6:ncol(mean_se)])
-```
-
-Nonetheless, we can now run the same fully-specified brms log-log model including the standard error term:
-
-```{r cytof_brm_se}
-
-priors<-c(set_prior("cauchy(0,10)", class = "b"),
-          set_prior("cauchy(0,5)", class = "b",coef="Concentration"),
-          set_prior("normal(0,1)", class = "sd"), 
-          set_prior("lkj(2)", class = "cor"))
-
-cytof_brm_se <-brm(formula = value | se(SE) ~ 
-            Concentration + 
-            GvsM+
-            MvsD+
-            Concentration:GvsM + 
-            Concentration:MvsD +
-                (1 + 
-                Concentration + 
-                GvsM+
-                MvsD+
-                Concentration:GvsM + 
-                Concentration:MvsD 
-                | CellType),
-            data = subset(mean_se,ContrastAgent!="control"), 
-            family = gaussian(),
-            prior = priors,
-            warmup = 1000, 
-            iter = 2000, 
-            chains = 4,
-            control = list(adapt_delta = 0.99,max_treedepth=15))
-
-stanplot(cytof_brm_se, type="hist",pars=c("^b"))
-```
-
-Let's see if there is any difference in the confidence intervals:
-
-SV: we should not call them confidence intervals, but rather credible intervals. The former are frequentist, 
-
-```{r cytof_hdi_se, echo=FALSE}
-mag_gad_se <- unlist(exp(posterior_samples(cytof_brm_se, 'b_GvsM', exact_match=T)))
-dot_mag_se <- unlist(exp(posterior_samples(cytof_brm_se, 'b_MvsD', exact_match=T)))
-print('95% HDI, log(Gad) > log(Mag) :')
-print(hdi(mag_gad_se))
-print('95% HDI, log(Mag) > log(Dot) :')
-print(hdi(dot_mag_se))
-
-```
-
-This approach as presently coded simply widens the variance of the estimated parameters. Central tendency is still similar (means of `r mean(mag_gad_log)` and `r mean(dot_mag_log)` for the log-log model without SE; and means of `r mean(mag_gad_se)` and `r mean(dot_mag_se)` for the log-log model with SE. Including the error creates less confidence in the estimate and takes us outside a 95% confidence interval for the effects. However, I do understand that small studies tend to be underpowered so if this is a superior model, this is what we should report.
 
 # RT-DC
 
@@ -406,7 +292,7 @@ clean_prots <- function(prots_raw) {
     return(prots_2)
 }
 
-rtdc <- load_data(RTDC_PATH)
+rtdc <- load_data(XL_PATH)
 ```
 
 The RT-DC method is currently experimental, and control tests for an individual subject produce a wide range of values. Consequently each measurement with a contrast agent was paired with its own control from the same session. The Figure below shows pairwise control-treatment plots colored by subject:
