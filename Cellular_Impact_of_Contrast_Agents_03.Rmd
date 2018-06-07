@@ -7,8 +7,8 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
-#PROJ_DIR ="./"
+#PROJ_DIR = "/home/ericbarnhill/Documents/code/R/masscyto_R"
+PROJ_DIR ="./"
 CYTOF_PATH <- file.path(PROJ_DIR, "cytof_data_2018_05_30.xlsx")
 RTDC_PATH <- file.path(PROJ_DIR, "RT-DC_FCS_Statistics-AAS-1.xls")
 knitr::opts_chunk$set(root.dir = PROJ_DIR)
