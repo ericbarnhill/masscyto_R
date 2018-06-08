@@ -28,18 +28,25 @@ set_columns <- function(df, main_columns, stat_types, cell_types, marker_types) 
 process_events <- function(mass_cyto) {
     cnames <- colnames(mass_cyto)
     events_cols <- unname(sapply(colnames(mass_cyto), function(x) {startsWith(str=x, pattern="Events")}))
-    adj_cols = as.data.frame(
-        apply(mass_cyto[,events_cols], FUN = function(x) {round(x * as.vector(mass_cyto["Counts"]) / 100)}, MARGIN=2))
-    mass_cyto[,events_cols] <- adj_cols
+    events <- mass_cyto[,events_cols]
+    events <- apply(X = events, MARGIN=2, FUN = function(x) {
+      x <- x / 100 * mass_cyto["Counts"]
+    })
+    mass_cyto[,events_cols] <- as.data.frame(events)
     return(mass_cyto)
 }
 
 
 clean_gather_data_se <- function(mass_cyto, main_columns, stat_types, cell_types, marker_types) {
-    # kludge for current data
-    #mass_cyto <- separate(mass_cyto, V1, c("Subject", "Date"), sep="_", remove=T)
+    mass_cyto <- separate(mass_cyto, Sample, c("Subject", "Date"), 
+                          sep="_", remove=T, extra="drop", fill="left")
     #
-    colnames(mass_cyto) <- set_columns(mass_cyto, main_columns, stat_types, cell_types, marker_types)
+    mass_cyto <- mass_cyto[!is.na(mass_cyto$Subject),]
+    mass_cyto_colnames <- set_columns(mass_cyto, main_columns, stat_types, cell_types, marker_types)
+    colnames(mass_cyto) <- mass_cyto_colnames
+    mass_cyto[,6:ncol(mass_cyto)] <- apply(X = mass_cyto[,6:ncol(mass_cyto)], MARGIN=2, FUN = function(x) {
+      as.numeric(as.character(unlist(x)))
+    })
     mass_cyto <- process_events(mass_cyto)
     mass_cyto_tall <- gather(mass_cyto, Measurement, Value, -Subject, -Date, -Experiment, -Contrast_Agent, -Concentration, -Counts) %>%
         select(-Counts)
@@ -59,7 +66,7 @@ clean_gather_data_se <- function(mass_cyto, main_columns, stat_types, cell_types
 load_clean_data <- function(path) {
     mass_cyto <- read.xls(xls=path)
     main_columns <- c("Subject", "Date", "Experiment", "Contrast_Agent", "Concentration", "Counts")
-    stat_types <- c("Events", "Mean", "Q05", "Q95")
+    stat_types <- c("Events", "Mean", "Median", "CV", "Q05", "Q95")
     cell_types <- c("Neutrophils","T cells","Monocytes","B cells","NK cells_1","NK cells_2")
     marker_types <- c("GdCl3")
     data_list <- clean_gather_data_se(mass_cyto, main_columns, stat_types, cell_types, marker_types)

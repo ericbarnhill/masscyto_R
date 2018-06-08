@@ -13,7 +13,7 @@ CYTOF_PATH <- file.path(PROJ_DIR, "cytof_data_2018_05_30.xlsx")
 RTDC_PATH <- file.path(PROJ_DIR, "RT-DC_FCS_Statistics-AAS-1.xls")
 knitr::opts_chunk$set(root.dir = PROJ_DIR)
 setwd(PROJ_DIR)
-packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", 'HDInterval')
+packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", "HDInteval", "bayesplot")
 lapply(packages, require, character.only = T)
 theme_set(theme_default())
 ```
@@ -34,9 +34,9 @@ Samples were analyzed for each of six cell types. In this pilot study a single s
 
 ```{r load_cytof, echo=FALSE}
 source('masscyto_clean_gather_data_se.R')
-mass_cyto <- read.xls(xls=CYTOF_PATH, 
-                      header=FALSE, skip=3)
-data_list <- clean_gather_data_se(mass_cyto)
+#mass_cyto <- read.xls(xls=CYTOF_PATH, 
+#                      header=FALSE, skip=3)
+data_list <- load_clean_data(CYTOF_PATH)
 masscyto_data_tall <- data_list[[1]]
 masscyto_data_wide <- data_list[[2]]
 print(summary(masscyto_data_wide))
