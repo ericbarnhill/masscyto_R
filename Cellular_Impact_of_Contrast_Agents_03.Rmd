@@ -13,7 +13,7 @@ CYTOF_PATH <- file.path(PROJ_DIR, "cytof_data_2018_05_30.xlsx")
 RTDC_PATH <- file.path(PROJ_DIR, "RT-DC_FCS_Statistics-AAS-1.xls")
 knitr::opts_chunk$set(root.dir = PROJ_DIR)
 setwd(PROJ_DIR)
-packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", "HDInteval", "bayesplot")
+packages <- c("gdata","tidyr","dplyr","magrittr", "ggplot2", "brms", "lattice", "HDInterval", "bayesplot")
 lapply(packages, require, character.only = T)
 theme_set(theme_default())
 ```
@@ -204,7 +204,6 @@ print(head(rtdc_diffs, n=20))
 #print(head(rtdc_wide))
 ```
 
-While the range of control values is quite wide (`r control_variance`), the control-treatment pairs deviate an average of `r unit_line_rss` from the unit line, suggesting the control-treatment pairings are a stabler value set.
 
 ```{r create_contrast_columns, echo=FALSE}
 
@@ -262,7 +261,7 @@ mean(mMonoContrAgtdiffEpostME$b_GdCl3_All>0)
 
 ## Neutrophils
 
-```{r brms_monocytes,  warning = FALSE, results="hide"}
+```{r brms_neutrophils,  warning = FALSE, results="hide"}
 priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
             set_prior("cauchy(0, 10)", class = "b"),
             set_prior("cauchy(0, 10)", class = "sd")
