@@ -69,7 +69,6 @@ print(plt)
 The log-lot plot looks reasonably linear:
 
 ```{r cytof_log_log}
-
 ggplot(subset(means, Contrast_Agent != 'control')) + 
     geom_line(aes(x=log(Concentration), y=log(Value), group=Cell_Type, color=Cell_Type)) +
     facet_wrap(~ Experiment + Contrast_Agent, scales='free')
@@ -82,7 +81,7 @@ SV: I don't understand what you mean about the intercept above. In the model bel
 We are again interpreting the slopes: the effect of GvsM and MvsD. A positive value for the respective parameter means that G > M and M > D. 
 
 
-```{r cytof_brm_log}
+```{r cytof_brm_log_setup}
 
 ## hand-coded sliding contrasts:
 masscyto_data_wide$GvsM<-ifelse(masscyto_data_wide$Contrast_Agent=="Gadovist",1,
@@ -96,7 +95,9 @@ priors<-c(set_prior("cauchy(0,10)", class = "b"),
 
 brm_df <- subset(masscyto_data_wide[c("logMean", "SE", "logConcentration", "GvsM", "MvsD", "Cell_Type", "Contrast_Agent")], Contrast_Agent!="control")
 brm_df$Contrast_Agent <- factor(brm_df$Contrast_Agent, labels = c("Gadovist", "Magnevist", "Dotarem"))
+```
 
+```{r cytof_brm_log,cache=TRUE}
 cytof_brm_log<-brm(formula = logMean | se(SE) ~ 
             logConcentration + 
             GvsM+
@@ -226,23 +227,43 @@ diffNeutro<-subset(rtdc_diffs,Cell_Type=="Neutrophils")
 
 ## Monocytes
 
+lme4:
 
-```{r brms_monocytes,  warning = FALSE, results="hide"}
-priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
-            set_prior("cauchy(0, 10)", class = "b"),
-            set_prior("cauchy(0, 10)", class = "sd")
+```{r}
+library(lme4)
+Monolmer<-lmer(E_diff_Mean~1+Gad_Mag+Mag_Dot+GdCl3_All+
+                (1 | Subject),
+              data = diffMono)
+summary(Monolmer)
+```
+
+```{r brms_monocytes,  cache=TRUE}
+priors_normal_diff2 <- c(set_prior("normal(0, 1)", class = "Intercept"),
+            set_prior("normal(0, 1)", class = "b"),
+            set_prior("normal(0, 1)", class = "sd")
+            #set_prior("normal(0, 1)", class = "sigma")
             )
 
 
 mdiffMonoContrAgt_E_ME <- brm(formula = E_diff_Mean | se(E_diff_SE) ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
                 (1 | Subject),
-              data = diffMono, family = gaussian(), prior = priors_cauchy_diff2,
-              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+              data = diffMono, family = gaussian(), prior = priors_normal_diff2,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999,max_treedepth=15))
 
 stanplot(mdiffMonoContrAgt_E_ME, type="hist",pars=c("^b"))
 
 mMonoContrAgtdiffEpostME<-posterior_samples(mdiffMonoContrAgt_E_ME, "^b")
 
+```
+
+```{r}
+prior_summary(mdiffMonoContrAgt_E_ME)
+```
+
+Convergence diagnostics:
+
+```{r}
+stanplot(mdiffMonoContrAgt_E_ME,type="trace",pars = c("^b","sd"))
 ```
 
 For Monocytes, there is weak evidence that GdCl3 causes a decrease in Young's Modulus against the other three contrast agents. The comparison of the individual contrast agents is not determinate at this time:
@@ -259,19 +280,34 @@ print("Prob GdCl3 > All")
 mean(mMonoContrAgtdiffEpostME$b_GdCl3_All>0)
 ```
 
+
 ## Neutrophils
 
-```{r brms_neutrophils,  warning = FALSE, results="hide"}
+lmer model:
+
+```{r}
+Neutrolmer<-lmer(E_diff_Mean  ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
+                (1 | Subject),
+              data = diffNeutro)
+
+summary(Neutrolmer)
+```
+
+```{r brms_neutrophils,cache=TRUE}
 priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
             set_prior("cauchy(0, 10)", class = "b"),
             set_prior("cauchy(0, 10)", class = "sd")
             )
 
+priors_normal_diff2 <- c(set_prior("normal(0, 1)", class = "Intercept"),
+            set_prior("normal(0, 1)", class = "b"),
+            set_prior("normal(0, 1)", class = "sd")
+            )
 
 mdiffNeutroContrAgt_E_ME <- brm(formula = E_diff_Mean | se(E_diff_SE) ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
                 (1 | Subject),
-              data = diffNeutro, family = gaussian(), prior = priors_cauchy_diff2,
-              iter = 2000, chains = 4, control = list(adapt_delta = 0.999))
+              data = diffNeutro, family = gaussian(), prior = priors_normal_diff2,
+              iter = 2000, chains = 4, control = list(adapt_delta = 0.999,max_treedepth=15))
 
 stanplot(mdiffNeutroContrAgt_E_ME, type="hist",pars=c("^b"))
 
