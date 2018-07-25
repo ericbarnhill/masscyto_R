@@ -122,25 +122,60 @@ cytof_brm_log<-brm(formula = logMean | se(SE) ~
 stanplot(cytof_brm_log, type="hist",pars=c("^b"))
 ```
 
-We then want to view the exponent of the posterior distributions, this time interested in the intercept:
+Back-transforming to the scale of the dependent measure (done by Shravan):
 
 ```{r cytof_hdi_log, echo=FALSE}
-mag_gad_log <- unlist(exp(posterior_samples(cytof_brm_log, 'b_GvsM', exact_match=T)))
-dot_mag_log <- unlist(exp(posterior_samples(cytof_brm_log, 'b_MvsD', exact_match=T)))
-print('95% HDI, log(Gad) > log(Mag) :')
-print(hdi(mag_gad_log))
-print('95% HDI, log(Mag) > log(Dot) :')
-print(hdi(dot_mag_log))
+Int <- unlist(posterior_samples(cytof_brm_log, pars='b_Intercept',exact_match=T))
+mag_gad <- unlist(posterior_samples(cytof_brm_log, pars='b_GvsM',exact_match=T))
+mag_gad_orig<-exp(Int+mag_gad)-exp(Int-mag_gad)
+hist(mag_gad_orig)
 
+dot_mag <- unlist(posterior_samples(cytof_brm_log, pars='b_MvsD',exact_match=T))
+dot_mag_orig<-exp(Int+dot_mag)-exp(Int-dot_mag)
+hist(dot_mag_orig)
+
+logconc <- unlist(posterior_samples(cytof_brm_log, pars='b_logConcentration',exact_match=T))
+conc_orig<-exp(Int+logconc)-exp(Int)
+hist(conc_orig)
+
+logconcGvsM <- unlist(posterior_samples(cytof_brm_log, pars='b_logConcentration:GvsM',exact_match=T))
+concGvsM_orig<-exp(Int+logconcGvsM)-exp(Int-logconcGvsM)
+hist(concGvsM_orig)
+
+logconcMvsD <- unlist(posterior_samples(cytof_brm_log, pars='b_logConcentration:MvsD',exact_match=T))
+concMvsD_orig<-exp(Int+logconcMvsD)-exp(Int-logconcMvsD)
+hist(concMvsD_orig)
+
+print(hdi(mag_gad_orig))
+print(hdi(dot_mag_orig))
+## etc.
 ```
 
-SV: If our model is
+How the above back-transofrmation works: If our model is
 
 $log(value) = \beta_1 + \beta_2 GvsM \dots$
 
-Shouldn't the transformation be
+We take exponents on each side to get the GvsM coefficients
 
-$exp(\beta_1 + \beta_2)$ and not just $exp(\beta_2)$?
+$exp(\beta_1 + \beta_2\times 1)-exp(\beta_1 - \beta_2\times 1)$
+
+The above expression gives us the difference between G and M.
+
+For the continuous measure log concentration, I back transformed as follows. let $\beta_2$ be the estimated coefficient for log concentration.
+
+On the log scale, we have:
+
+$log(y) = \beta_0 + \beta_2$
+
+Taking exponents on both sides:
+
+$y = exp(\beta_0 + \beta_2)$
+
+Now, we can see the effect increasing concentration by 1 unit by doing:
+
+$exp(\beta_0 + \beta_2)-exp(\beta_0)$
+
+
 
 ```{r}
 mag_gad_log <-unlist(exp(posterior_samples(cytof_brm_log,'b_Intercept',exact_match=TRUE)+
@@ -227,15 +262,6 @@ diffNeutro<-subset(rtdc_diffs,Cell_Type=="Neutrophils")
 
 ## Monocytes
 
-lme4:
-
-```{r}
-library(lme4)
-Monolmer<-lmer(E_diff_Mean~1+Gad_Mag+Mag_Dot+GdCl3_All+
-                (1 | Subject),
-              data = diffMono)
-summary(Monolmer)
-```
 
 ```{r brms_monocytes,  cache=TRUE}
 priors_normal_diff2 <- c(set_prior("normal(0, 1)", class = "Intercept"),
@@ -248,28 +274,50 @@ priors_normal_diff2 <- c(set_prior("normal(0, 1)", class = "Intercept"),
 mdiffMonoContrAgt_E_ME <- brm(formula = E_diff_Mean | se(E_diff_SE) ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
                 (1 | Subject),
               data = diffMono, family = gaussian(), prior = priors_normal_diff2,
-              iter = 2000, chains = 4, control = list(adapt_delta = 0.999,max_treedepth=15))
+              iter = 4000, chains = 4, control = list(adapt_delta = 0.9999,max_treedepth=15))
 
 stanplot(mdiffMonoContrAgt_E_ME, type="hist",pars=c("^b"))
-
-mMonoContrAgtdiffEpostME<-posterior_samples(mdiffMonoContrAgt_E_ME, "^b")
-
-```
-
-```{r}
-prior_summary(mdiffMonoContrAgt_E_ME)
 ```
 
 Convergence diagnostics:
 
 ```{r}
+summary(mdiffMonoContrAgt_E_ME,pars=c("^b","sd"))
+```
+
+```{r}
 stanplot(mdiffMonoContrAgt_E_ME,type="trace",pars = c("^b","sd"))
+```
+
+The trace plots don't show any problems. I am not sure where the divergent transition is coming from. 
+
+```{r eval=FALSE}
+library(rstan)
+options(mc.cores = parallel::detectCores())
+
+diffMono$subj<-as.numeric(diffMono$Subject)
+```
+
+```{r eval=FALSE}
+dat <- list(N = dim(diffMono)[1], 
+            y = diffMono$E_diff_Mean,
+            SD = diffMono$E_diff_SE,
+            J=length(unique(diffMono$subj)),
+            Gad_Mag=diffMono$Gad_Mag,
+            Mag_Dot=diffMono$Mag_Dot,
+            GdCl3_All=diffMono$GdCl3_All)
+
+MonoMEfit <- stan(model_code = stanmodelcode, model_name = "MonoME", 
+            data = dat, 
+            iter = 2000, chains = 4) 
+print(fit)
 ```
 
 For Monocytes, there is weak evidence that GdCl3 causes a decrease in Young's Modulus against the other three contrast agents. The comparison of the individual contrast agents is not determinate at this time:
 
 
 ```{r mono_stats, echo=FALSE}
+mMonoContrAgtdiffEpostME<-posterior_samples(mdiffMonoContrAgt_E_ME, "^b")
 print("Prob Gad > Mag")
 mean(mMonoContrAgtdiffEpostME$b_Gad_Mag>0)
 print("Prob Gad < Mag")
@@ -283,15 +331,6 @@ mean(mMonoContrAgtdiffEpostME$b_GdCl3_All>0)
 
 ## Neutrophils
 
-lmer model:
-
-```{r}
-Neutrolmer<-lmer(E_diff_Mean  ~ 1+Gad_Mag+Mag_Dot+GdCl3_All+
-                (1 | Subject),
-              data = diffNeutro)
-
-summary(Neutrolmer)
-```
 
 ```{r brms_neutrophils,cache=TRUE}
 priors_cauchy_diff2 <- c(set_prior("cauchy(0, 10)", class = "Intercept"),
