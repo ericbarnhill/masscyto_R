@@ -58,15 +58,13 @@ plt <- ggplot(means_conc_1) +
     ggtitle("Means By Contrast Agent @ Concentration 1") +
     scale_x_discrete(labels = c("Dot", "Mag", "Gad"))
 print(plt)
-
-
 ```
 
 
 
 ## Log-log means plot
 
-The log-lot plot looks reasonably linear:
+The log-log plot looks reasonably linear:
 
 ```{r cytof_log_log}
 ggplot(subset(means, Contrast_Agent != 'control')) + 
@@ -74,11 +72,7 @@ ggplot(subset(means, Contrast_Agent != 'control')) +
     facet_wrap(~ Experiment + Contrast_Agent, scales='free')
 ```
 
-In contrast to the previous normal model, which evaluated slopes, here we model the slope as uniform and the change as occurring in the *intercept* of the data. Consequently we will interpret change in *intercept* as an effect. The model is as follows:
-
-SV: I don't understand what you mean about the intercept above. In the model below, it's still the slopes for GvsM and MvsD (and their interaction with concentration) that we are interpreting, isn't it?  Oh, I just understood what you are saying here. It's actually the slopes that we are interpreting here; maybe what is confusing about brms is that all *coefficients* (called b in the priors) have a Cauchy(0,10) prior. So, we should rather say:
-
-We are again interpreting the slopes: the effect of GvsM and MvsD. A positive value for the respective parameter means that G > M and M > D. 
+Here we are interpreting the average effects. The slopes tell us the effect of GvsM and MvsD. A positive value for the respective parameter means that G > M and M > D. 
 
 
 ```{r cytof_brm_log_setup}
@@ -120,6 +114,7 @@ cytof_brm_log<-brm(formula = logMean | se(SE) ~
             control = list(adapt_delta = 0.99,max_treedepth=15))
 
 stanplot(cytof_brm_log, type="hist",pars=c("^b"))
+
 ```
 
 Back-transforming to the scale of the dependent measure (done by Shravan):
@@ -151,7 +146,7 @@ print(hdi(dot_mag_orig))
 ## etc.
 ```
 
-How the above back-transofrmation works: If our model is
+How the above back-transformation works: If our model is
 
 $log(value) = \beta_1 + \beta_2 GvsM \dots$
 
@@ -196,9 +191,183 @@ SV: Is this what you mean (see code immediately below)? How can probability mass
 mean(unlist(posterior_samples(cytof_brm_log, 'b_GvsM',exact_match=TRUE))>0)
 ```
 
-### Predictive modelling
+## Average effects vs individual level effects for paper
 
-While the goal of the analysis was to find the impact of the contrast agent independent of cell type and experiment, it leaves the result somewhat abstract. We can use the model to predict, for example, what impact a change of contrast agent will have on each cell types. For example we can ask the question, if we use Gadovist instead of Magnevist, what is the expected increase in signal for each unit of concentration, as estimated at concentration 1:
+### Average effects
+
+```{r}
+library(bayesplot)
+post<-posterior_samples(cytof_brm_log)
+## extract variances:
+alpha<-post$b_Intercept
+betalogconc<-post$b_logConcentration
+betaGvsM<-post$b_GvsM
+betaMvsD<-post$b_MvsD
+betaconcGvsM<-post[,5]
+betaconcMvsD<-post[,6]
+
+cor<-posterior_samples(cytof_brm_log,"^cor")
+sd<-posterior_samples(cytof_brm_log,"^sd")
+sigma<-posterior_samples(cytof_brm_log,"sigma")
+
+cell_re<-posterior_samples(cytof_brm_log,"^r_Cell")
+```
+
+```{r}
+meandifflogconc<- exp(alpha + betalogconc) - exp(alpha - betalogconc)
+mean(meandifflogconc)
+round(quantile(meandifflogconc,prob=c(0.025,0.975)),0)
+
+meandiffGvsM<- exp(alpha + betaGvsM) - exp(alpha - betaGvsM)
+mean(meandiffGvsM)
+round(quantile(meandiffGvsM,prob=c(0.025,0.975)),0)
+
+meandiffMvsD<- exp(alpha + betaMvsD) - exp(alpha - betaMvsD)
+mean(meandiffMvsD)
+round(quantile(meandiffMvsD,prob=c(0.025,0.975)),0)
+
+meandiffconcGvsM<- exp(alpha + betaconcGvsM) - exp(alpha - betaconcGvsM)
+mean(meandiffconcGvsM)
+round(quantile(meandiffconcGvsM,prob=c(0.025,0.975)),0)
+
+meandiffconcMvsD<- exp(alpha + betaconcMvsD) - exp(alpha - betaconcMvsD)
+mean(meandiffconcMvsD)
+round(quantile(meandiffconcMvsD,prob=c(0.025,0.975)),0)
+
+op<-par(mfrow=c(3,2),pty="s")
+hist(meandifflogconc,freq=FALSE,main="Log Concentration",
+     xlab="")
+hist(meandiffGvsM,freq=FALSE,main="Gadovist vs Magnevist",
+     xlab="")
+hist(meandiffMvsD,freq=FALSE,main="Magnevist vs Dotarem",
+     xlab="")
+hist(meandiffconcGvsM,freq=FALSE,main="Log concentration x \n Gadovist vs Magnevist",
+     xlab="")
+hist(meandiffconcMvsD,freq=FALSE,main="Log concentration x \n Magnevist vs Dotarem",
+     xlab="")
+```
+
+### Individual level effects
+
+```{r}
+celldifflogconc<-matrix(rep(NA,6*4000),nrow=6)
+for(i in 1:6){
+celldifflogconc[i,]<-exp(alpha + cell_re[,i]  + (betalogconc+cell_re[,i+6])) - 
+  exp(alpha + cell_re[,i] - 
+        (betalogconc+cell_re[,i+6]))
+}
+celldifflogconc<-t(celldifflogconc)
+
+celldifflogconc<-as.data.frame(celldifflogconc)
+colnames(celldifflogconc)<-unique(brm_df$Cell_Type)
+mns <- colMeans(celldifflogconc)
+celldifflogconc<-celldifflogconc[,order(mns)]
+mcmc_areas(celldifflogconc)+ggtitle("Log Concentration")
+```
+
+```{r}
+celldiffGvsM<-matrix(rep(NA,6*4000),nrow=6)
+for(i in 1:6){
+celldiffGvsM[i,]<-exp(alpha + cell_re[,i]  + (betaGvsM+cell_re[,i+7])) - 
+  exp(alpha + cell_re[,i] - 
+        (betaGvsM+cell_re[,i+7]))
+}
+celldiffGvsM<-t(celldiffGvsM)
+
+celldiffGvsM<-as.data.frame(celldiffGvsM)
+colnames(celldiffGvsM)<-unique(brm_df$Cell_Type)
+mns <- colMeans(celldiffGvsM)
+celldiffGvsM<-celldiffGvsM[,order(mns)]
+mcmc_areas(celldiffGvsM)+ggtitle("G vs M")
+```
+
+
+
+
+```{r}
+celldiffMvsD<-matrix(rep(NA,6*4000),nrow=6)
+for(i in 1:6){
+  celldiffMvsD[i,]<-exp(alpha + cell_re[,i]  + (betaMvsD+cell_re[,i+7])) - 
+    exp(alpha + cell_re[,i] - 
+          (betaMvsD+cell_re[,i+7]))
+}
+celldiffMvsD<-t(celldiffMvsD)
+
+celldiffMvsD<-as.data.frame(celldiffMvsD)
+colnames(celldiffMvsD)<-unique(brm_df$Cell_Type)
+mns <- colMeans(celldiffMvsD)
+celldiffMvsD<-celldiffMvsD[,order(mns)]
+mcmc_areas(celldiffMvsD)+ggtitle("M vs D")
+```
+
+```{r}
+celldiffconcGvsM<-matrix(rep(NA,6*4000),nrow=6)
+for(i in 1:6){
+  celldiffconcGvsM[i,]<-exp(alpha + cell_re[,i]  + (betaconcGvsM+cell_re[,i+7])) - 
+    exp(alpha + cell_re[,i] - 
+          (betaconcGvsM+cell_re[,i+7]))
+}
+celldiffconcGvsM<-t(celldiffconcGvsM)
+
+celldiffconcGvsM<-as.data.frame(celldiffconcGvsM)
+colnames(celldiffconcGvsM)<-unique(brm_df$Cell_Type)
+mns <- colMeans(celldiffconcGvsM)
+celldiffconcGvsM<-celldiffconcGvsM[,order(mns)]
+mcmc_areas(celldiffconcGvsM)+ggtitle("Concentration x \n G vs M")
+```
+
+```{r}
+celldiffconcMvsD<-matrix(rep(NA,6*4000),nrow=6)
+for(i in 1:6){
+  celldiffconcMvsD[i,]<-exp(alpha + cell_re[,i]  + (betaconcMvsD+cell_re[,i+7])) - 
+    exp(alpha + cell_re[,i] - 
+          (betaconcMvsD+cell_re[,i+7]))
+}
+celldiffconcMvsD<-t(celldiffconcMvsD)
+
+celldiffconcMvsD<-as.data.frame(celldiffconcMvsD)
+colnames(celldiffconcMvsD)<-unique(brm_df$Cell_Type)
+mns <- colMeans(celldiffconcMvsD)
+celldiffconcMvsD<-celldiffconcMvsD[,order(mns)]
+mcmc_areas(celldiffconcMvsD)+ggtitle("Concentration x \n M vs D")
+```
+
+Could build histograms separately by cell.
+
+```{r}
+op<-par(mfrow=c(3,2),pty="s")
+for(i in 1:6){
+hist(celldifflogconc[,i],freq=FALSE,xlab="Log concentration",
+     main=colnames(celldifflogconc)[i])
+}
+
+op<-par(mfrow=c(3,2),pty="s")
+for(i in 1:6){
+  hist(celldiffGvsM[,i],freq=FALSE,xlab="G vs M",
+       main=colnames(celldiffGvsM)[i])
+}
+
+op<-par(mfrow=c(3,2),pty="s")
+for(i in 1:6){
+  hist(celldiffMvsD[,i],freq=FALSE,xlab="M vs D",
+       main=colnames(celldiffMvsD)[i])
+}
+
+op<-par(mfrow=c(3,2),pty="s")
+for(i in 1:6){
+  hist(celldiffconcGvsM[,i],freq=FALSE,xlab="Conc x G vs M",
+       main=colnames(celldiffconcGvsM)[i])
+}
+
+op<-par(mfrow=c(3,2),pty="s")
+for(i in 1:6){
+  hist(celldiffconcMvsD[,i],freq=FALSE,xlab="Conc x M vs D",
+       main=colnames(celldiffconcMvsD)[i])
+}
+
+```
+
+
 
 # RT-DC
 
